@@ -6,6 +6,7 @@
 #include "mimpi.h"
 #include "mimpi_common.h"
 #include <stdlib.h>
+#include <unistd.h>
 
 void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
@@ -16,6 +17,11 @@ void MIMPI_Init(bool enable_deadlock_detection) {
 
 void MIMPI_Finalize() {
     //TODO
+    int rank = MIMPI_World_rank(); // Get the id of the process.
+    // Close the read descriptor.
+    ASSERT_SYS_OK(close(rank + 20));
+    // Close the write descriptor.
+    ASSERT_SYS_OK(close(rank + 36));
 
     channels_finalize();
 }
@@ -42,7 +48,10 @@ MIMPI_Retcode MIMPI_Send(
     int destination,
     int tag
 ) {
-    TODO
+    //TODO
+    //ssize_t sent = chsend(20 + destination, data, count);
+    chsend(20 + destination, data, count);
+    return MIMPI_SUCCESS;
 }
 
 MIMPI_Retcode MIMPI_Recv(
@@ -51,7 +60,11 @@ MIMPI_Retcode MIMPI_Recv(
     int source,
     int tag
 ) {
-    TODO
+    //TODO
+    char buffer[1024];
+    ssize_t read = chrecv(26 + source, buffer, 1024);
+    ASSERT_SYS_OK(read);
+    return MIMPI_SUCCESS;
 }
 
 MIMPI_Retcode MIMPI_Barrier() {
