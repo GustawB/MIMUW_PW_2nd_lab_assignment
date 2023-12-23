@@ -29,7 +29,6 @@ int main(int argc, char** argv) {
     {
         char* substr = malloc((strlen(fp_prog) - 1) * sizeof(char));
         strncpy(substr, &fp_prog[2], strlen(fp_prog) - 2);
-        free(fp_prog);
         fp_prog = substr;
     }
     // Make array of args for processes that will be executed later.
@@ -45,11 +44,22 @@ int main(int argc, char** argv) {
         ASSERT_SYS_OK(pid);
         if (!pid) {// Child
             char id_buffer[sizeof(int)];
-            sprintf(id_buffer, "%d", i); // This will cast 'int i' to char*;
+            // This will cast 'int i' to char*;
+            int ret = sprintf(id_buffer, "%d", i);
+            if (ret < 0 || ret >= (int)sizeof(id_buffer))
+                fatal("Adding envvar_name_id failed");
             setenv(envvar_name_id, id_buffer, 0);
+            // Add enviromental variable describing the id
+            // of the executed program.
             char world_size_buffer[sizeof(int)];
+            // This will cast 'int nr_of_copies' to char*;
             sprintf(world_size_buffer, "%d", nr_of_copies);
+            if (ret < 0 || ret >= (int)sizeof(world_size_buffer))
+                fatal("Adding envvar_name_world_size failed");
+            // Add enviromental variable describing the size
+            // of the current world.
             setenv(envvar_name_world_size, world_size_buffer, 0);
+
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
             }
