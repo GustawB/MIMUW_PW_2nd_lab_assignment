@@ -5,25 +5,32 @@
 #include "channel.h"
 #include "mimpi.h"
 #include "mimpi_common.h"
+#include <stdlib.h>
 
 void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
 
-    TODO
+    //TODO
 }
 
 void MIMPI_Finalize() {
-    TODO
+    //TODO
 
     channels_finalize();
 }
 
 int MIMPI_World_size() {
-    TODO
+    //TODO
+    const char* envvar_name_world_size = "world_size";
+    char* world_size = getenv(envvar_name_world_size);
+    return atoi(world_size);
 }
 
 int MIMPI_World_rank() {
-    TODO
+    //TODO
+    const char* envvar_name_id = "process_id";
+    char* process_id = getenv(envvar_name_id);
+    return atoi(process_id);
 }
 
 MIMPI_Retcode MIMPI_Send(

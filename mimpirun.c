@@ -32,17 +32,24 @@ int main(int argc, char** argv) {
         free(fp_prog);
         fp_prog = substr;
     }
+    // Make array of args for processes that will be executed later.
     char** program_args = NULL;
     if (argc > 3) {
         program_args = &argv[3];
     }
-
-    printf("%s\n", fp_prog);
+    const char* envvar_name_id = "process_id";
+    const char* envvar_name_world_size = "world_size";
     // Start processes.
     for (int i = 0; i < nr_of_copies; ++i) {
         pid_t pid = fork();
         ASSERT_SYS_OK(pid);
         if (!pid) {// Child
+            char id_buffer[sizeof(int)];
+            sprintf(id_buffer, "%d", i); // This will cast 'int i' to char*;
+            setenv(envvar_name_id, id_buffer, 0);
+            char world_size_buffer[sizeof(int)];
+            sprintf(world_size_buffer, "%d", nr_of_copies);
+            setenv(envvar_name_world_size, world_size_buffer, 0);
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
             }
