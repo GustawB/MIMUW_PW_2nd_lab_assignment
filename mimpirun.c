@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "mimpi_common.h"
+#include "channel.h"
 
 int main(int argc, char** argv) {
     //TODO;
@@ -40,9 +41,9 @@ int main(int argc, char** argv) {
     const char* envvar_name_world_size = "world_size";
     // Start processes.
     for (int i = 0; i < nr_of_copies; ++i) {
-        // Create pipe.
-        int pipe_dsc[2];
-        ASSERT_SYS_OK(pipe(pipe_dsc));
+        // Create channel.
+        int channel_dsc[2];
+        ASSERT_SYS_OK(channel(channel_dsc));
 
         pid_t pid = fork();
         ASSERT_SYS_OK(pid);
@@ -64,14 +65,14 @@ int main(int argc, char** argv) {
             // of the current world.
             ASSERT_ZERO(setenv(envvar_name_world_size, world_size_buffer, 0));
 
-            // Move read descriptor to the index = 1024+id.
-            ASSERT_SYS_OK(dup2(pipe_dsc[0], 1024 + i));
+            // Move read descriptor to the index = 20+id.
+            ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + i));
             // Close the old read descriptor.
-            ASSERT_SYS_OK(close(pipe_dsc[0]));
-            // Move read descriptor to the index = 1024+16+id.
-            ASSERT_SYS_OK(dup2(pipe_dsc[1], 1024 + 16 + i));
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(pipe_dsc[1]));
+            ASSERT_SYS_OK(close(channel_dsc[0]));
+            // Move read descriptor to the index = 20+16+id.
+            ASSERT_SYS_OK(dup2(channel_dsc[1], 20 + 16 + i));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(channel_dsc[1]));
 
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
@@ -82,10 +83,10 @@ int main(int argc, char** argv) {
         }
         else
         {
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(channel_dsc[0]));
             // Close the old write descriptor.
-            ASSERT_SYS_OK(close(pipe_dsc[0]));
-            // Close the old wirte descriptor.
-            ASSERT_SYS_OK(close(pipe_dsc[1]));
+            ASSERT_SYS_OK(close(channel_dsc[1]));
         }
     }
 
