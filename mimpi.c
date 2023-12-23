@@ -23,6 +23,7 @@ int MIMPI_World_size() {
     //TODO
     const char* envvar_name_world_size = "world_size";
     char* world_size = getenv(envvar_name_world_size);
+    ASSERT_NOT_NULL(world_size);
     return atoi(world_size);
 }
 
@@ -30,6 +31,7 @@ int MIMPI_World_rank() {
     //TODO
     const char* envvar_name_id = "process_id";
     char* process_id = getenv(envvar_name_id);
+    ASSERT_NOT_NULL(process_id);
     return atoi(process_id);
 }
 
