@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
             int ret = sprintf(id_buffer, "%d", i);
             if (ret < 0 || ret >= (int)sizeof(id_buffer))
                 fatal("Adding envvar_name_id failed");
-            setenv(envvar_name_id, id_buffer, 0);
+            ASSERT_ZERO(setenv(envvar_name_id, id_buffer, 0));
             // Add enviromental variable describing the id
             // of the executed program.
             char world_size_buffer[sizeof(int)];
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
                 fatal("Adding envvar_name_world_size failed");
             // Add enviromental variable describing the size
             // of the current world.
-            setenv(envvar_name_world_size, world_size_buffer, 0);
+            ASSERT_ZERO(setenv(envvar_name_world_size, world_size_buffer, 0));
 
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
