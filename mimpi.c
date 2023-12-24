@@ -6,6 +6,7 @@
 #include "mimpi.h"
 #include "mimpi_common.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <unistd.h>
 
 void MIMPI_Init(bool enable_deadlock_detection) {
@@ -49,8 +50,10 @@ MIMPI_Retcode MIMPI_Send(
     int tag
 ) {
     //TODO
-    //ssize_t sent = chsend(20 + destination, data, count);
-    chsend(20 + destination, data, count);
+    ssize_t sent = chsend(36 + destination, data, count);
+    ASSERT_SYS_OK(sent);
+    if (sent != count)
+        fatal("Wrote less than expected.");
     return MIMPI_SUCCESS;
 }
 
@@ -61,8 +64,9 @@ MIMPI_Retcode MIMPI_Recv(
     int tag
 ) {
     //TODO
-    char buffer[1024];
-    ssize_t read = chrecv(26 + source, buffer, 1024);
+    int my_rank = MIMPI_World_rank();
+    printf("%d\n", my_rank);
+    ssize_t read = chrecv(20 + my_rank, data, count);
     ASSERT_SYS_OK(read);
     return MIMPI_SUCCESS;
 }

@@ -37,14 +37,26 @@ int main(int argc, char** argv) {
     if (argc > 3) {
         program_args = &argv[3];
     }
-    const char* envvar_name_id = "process_id";
-    const char* envvar_name_world_size = "world_size";
-    // Start processes.
+
+    // Create nr_of_copies pipes.
     for (int i = 0; i < nr_of_copies; ++i) {
         // Create channel.
         int channel_dsc[2];
         ASSERT_SYS_OK(channel(channel_dsc));
+        // Move read descriptor to the index = 20+id.
+        ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + i));
+        // Close the old read descriptor.
+        ASSERT_SYS_OK(close(channel_dsc[0]));
+        // Move write descriptor to the index = 20+16+id.
+        ASSERT_SYS_OK(dup2(channel_dsc[1], 20 + 16 + i));
+        // Close the old write descriptor.
+        ASSERT_SYS_OK(close(channel_dsc[1]));
+    }
 
+    const char* envvar_name_id = "process_id";
+    const char* envvar_name_world_size = "world_size";
+    // Start processes.
+    for (int i = 0; i < nr_of_copies; ++i) {
         pid_t pid = fork();
         ASSERT_SYS_OK(pid);
         if (!pid) {// Child
@@ -65,28 +77,12 @@ int main(int argc, char** argv) {
             // of the current world.
             ASSERT_ZERO(setenv(envvar_name_world_size, world_size_buffer, 0));
 
-            // Move read descriptor to the index = 20+id.
-            ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + i));
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[0]));
-            // Move read descriptor to the index = 20+16+id.
-            ASSERT_SYS_OK(dup2(channel_dsc[1], 20 + 16 + i));
-            // Close the old write descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[1]));
-
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
             }
             else {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, program_args, NULL));
             }
-        }
-        else
-        {
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[0]));
-            // Close the old write descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[1]));
         }
     }
 
