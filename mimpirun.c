@@ -43,18 +43,18 @@ int main(int argc, char** argv) {
         // Create channel.
         int channel_dsc[2];
         ASSERT_SYS_OK(channel(channel_dsc));
-        // Move read descriptor to the index = 20+id.
-        ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + i));
+        // Move read descriptor to the index = 36+id.
+        ASSERT_SYS_OK(dup2(channel_dsc[0], 36 + i));
         // Close the old read descriptor.
         ASSERT_SYS_OK(close(channel_dsc[0]));
-        // Move write descriptor to the index = 20+16+id.
-        ASSERT_SYS_OK(dup2(channel_dsc[1], 20 + 16 + i));
+        // Move write descriptor to the index = 36+16+id.
+        ASSERT_SYS_OK(dup2(channel_dsc[1], 52 + i));
         // Close the old write descriptor.
         ASSERT_SYS_OK(close(channel_dsc[1]));
     }
 
-    const char* envvar_name_id = "process_id";
-    const char* envvar_name_world_size = "world_size";
+    const char* MIMPI_envvar_name_id = "process_id";
+    const char* MIMPI_envvar_name_world_size = "world_size";
     // Start processes.
     for (int i = 0; i < nr_of_copies; ++i) {
         pid_t pid = fork();
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
             int ret = sprintf(id_buffer, "%d", i);
             if (ret < 0 || ret >= (int)sizeof(id_buffer))
                 fatal("Adding envvar_name_id failed");
-            ASSERT_ZERO(setenv(envvar_name_id, id_buffer, 0));
+            ASSERT_ZERO(setenv(MIMPI_envvar_name_id, id_buffer, 0));
             // Add enviromental variable describing the id
             // of the executed program.
             char world_size_buffer[sizeof(int)];
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
                 fatal("Adding envvar_name_world_size failed");
             // Add enviromental variable describing the size
             // of the current world.
-            ASSERT_ZERO(setenv(envvar_name_world_size, world_size_buffer, 0));
+            ASSERT_ZERO(setenv(MIMPI_envvar_name_world_size, world_size_buffer, 0));
 
             if (program_args == NULL) {
                 ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
