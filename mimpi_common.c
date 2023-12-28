@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <pthread.h>
 
 _Noreturn void syserr(const char* fmt, ...)
 {
@@ -52,7 +53,7 @@ int world_size;
 int is_barrier_ending;
 
 void common_init(int size) {
-    ASSERT_ZERO(pthread_mutex_init(barrier_mutex, NULL));
+    ASSERT_ZERO(pthread_mutex_init(&barrier_mutex, NULL));
     world_size = size;
     waiting_for_barrier = 0;
     inside_barrier = 0;
@@ -60,7 +61,7 @@ void common_init(int size) {
 }
 
 void common_finalize() {
-    ASSERT_ZERO(pthread_mutex_destroy(barrier_mutex));
+    ASSERT_ZERO(pthread_mutex_destroy(&barrier_mutex));
     world_size = -1;
     waiting_for_barrier = -1;
     inside_barrier = -1;
@@ -68,26 +69,31 @@ void common_finalize() {
     is_barrier_ending = -1;
 }
 
-int synchronizeProcesses() {
+void* synchronizeProcesses() {
     if (world_size == -1) {
         fatal("mimpi_common library not initialized");
     }
 
     if (is_barrier_ending == 1) {
         ++waiting_for_barrier;
-        ASSERT_ZERO(int pthread_mutex_lock(barrier_mutex));
+        ASSERT_ZERO(pthread_mutex_lock(&barrier_mutex));
         --waiting_for_barrier;
         if (waiting_for_barrier > 0) {
-            ASSERT_ZERO(int pthread_mutex_unlock(barrier_mutex));
+            ASSERT_ZERO(pthread_mutex_unlock(&barrier_mutex));
         }
     }
     ++inside_barrier;
+    int* return_value = malloc(sizeof(int));
+    *return_value = 0;
     if (inside_barrier == world_size) { // Everyone is synchronized.
         is_barrier_ending = 1;
+        *return_value = 1;
     }
+
+    return return_value;
 }
 
 void unlock_barrier() {
     is_barrier_ending = 0;
-    ASSERT_ZERO(int pthread_mutex_unlock(barrier_mutex));
+    ASSERT_ZERO(pthread_mutex_unlock(&barrier_mutex));
 }

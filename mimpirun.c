@@ -38,6 +38,9 @@ int main(int argc, char** argv) {
         program_args = &argv[3];
     }
 
+    // Initialize mimpi_common library.
+    common_init(nr_of_copies);
+
     // Create nr_of_copies pipes.
     for (int i = 0; i < nr_of_copies; ++i) {
         // Create channel.
@@ -90,6 +93,9 @@ int main(int argc, char** argv) {
     for (int i = 0; i < nr_of_copies; ++i) {
         ASSERT_SYS_OK(wait(NULL));
     }
+
+    // Clear mimpi_common library.
+    common_finalize();
 
     return 0;
 }

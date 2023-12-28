@@ -8,14 +8,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
-
-
     //TODO
 }
 
@@ -77,41 +76,32 @@ MIMPI_Retcode MIMPI_Barrier() {
     //TODO
     int id = MIMPI_World_rank();
     int world_size = MIMPI_World_size();
-    char total_count_buffer = 1;
-    unsigned int total_count = 0;
+    char dummy_data = 69;
     char buffer;
-    int count = 1;
 
-    if (id == 0) {
-        total_count = 1;
-        //printf("%d\n", total_count);
-        chsend(52 + ((id+1)%world_size), &total_count_buffer, count);
+    pthread_t thread;
+    ASSERT_ZERO(pthread_create(&thread, NULL, synchronizeProcesses, NULL));
+    int* result;
+    ASSERT_ZERO(pthread_join(thread, (void**)&result));
+    if (*result == 1) { // We are the last process in the barrier.
+        chsend(52, &dummy_data, 1); // Wake up the first process.
+    }
+
+    chrecv(36 + id, &buffer, 1);
+    if (id == world_size - 1) {
+        // We are the last process, it's time to free-up the barrier.
+        unlock_barrier();
     }
     else {
-        chrecv(36 + id, &buffer, count);
-        total_count = buffer + 1;
-        total_count_buffer = total_count;
-        //printf("%d\n", total_count);
-        chsend(52 + ((id + 1) % world_size), &total_count_buffer, count);
+        int first = 2 * id;
+        int second = first + 1;
+        if (first < world_size) {
+            chsend(52 + first, &dummy_data, 1);
+        }
+        if (second < world_size) {
+            chsend(52 + second, &dummy_data, 1);
+        }
     }
-    while (total_count < world_size) {
-        chrecv(36 + id, &buffer, count);
-        total_count = buffer;
-        total_count_buffer = total_count;
-        //printf("%d\n", total_count);
-        chsend(52 + ((id + 1) % world_size), &total_count_buffer, count);
-    }
-
-    
-    /*// 1. Send garbage to the next process.
-    chsend(52 + ((id+1)%world_size), &garbageData, count);
-    //2. Wait for the garbage from the previous process.
-    chrecv(36 + id, &buffer, count);
-    //3. Send second garbage to the next process.
-    chsend(52 + ((id + 1) % world_size), &garbageData, count);
-    //4. Wait for the second garbage from the previous process.
-    chrecv(36 + id, &buffer, count);*/
-    
     return MIMPI_SUCCESS;
 }
 
