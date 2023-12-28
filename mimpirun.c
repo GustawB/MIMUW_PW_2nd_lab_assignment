@@ -38,8 +38,10 @@ int main(int argc, char** argv) {
         program_args = &argv[3];
     }
 
+    printf("beforum\n");
     // Initialize mimpi_common library.
     common_init(nr_of_copies);
+    printf("afterum\n");
 
     // Create nr_of_copies pipes.
     for (int i = 0; i < nr_of_copies; ++i) {

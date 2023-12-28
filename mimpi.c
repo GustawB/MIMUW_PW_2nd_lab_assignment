@@ -83,6 +83,7 @@ MIMPI_Retcode MIMPI_Barrier() {
     ASSERT_ZERO(pthread_create(&thread, NULL, synchronizeProcesses, NULL));
     int* result;
     ASSERT_ZERO(pthread_join(thread, (void**)&result));
+    printf("%d\n", *result);
     if (*result == 1) { // We are the last process in the barrier.
         chsend(52, &dummy_data, 1); // Wake up the first process.
     }

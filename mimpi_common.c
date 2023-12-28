@@ -47,14 +47,15 @@ _Noreturn void fatal(const char* fmt, ...)
 
 // Mutex used to synchronize the barrier
 pthread_mutex_t barrier_mutex;
-int waiting_for_barrier;
-int inside_barrier;
-int world_size;
-int is_barrier_ending;
+int waiting_for_barrier = -1;
+int inside_barrier = -1;
+int world_size = -1;
+int is_barrier_ending = -1;
 
 void common_init(int size) {
     ASSERT_ZERO(pthread_mutex_init(&barrier_mutex, NULL));
     world_size = size;
+    printf("world size: %d\n", world_size);
     waiting_for_barrier = 0;
     inside_barrier = 0;
     is_barrier_ending = 0;
@@ -85,7 +86,9 @@ void* synchronizeProcesses() {
     ++inside_barrier;
     int* return_value = malloc(sizeof(int));
     *return_value = 0;
+    printf("%d, %d\n", inside_barrier, world_size);
     if (inside_barrier == world_size) { // Everyone is synchronized.
+        printf("sex\n");
         is_barrier_ending = 1;
         *return_value = 1;
     }
