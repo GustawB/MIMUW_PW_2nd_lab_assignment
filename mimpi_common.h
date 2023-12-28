@@ -60,5 +60,4 @@ _Noreturn extern void fatal(const char* fmt, ...);
 
 
 
-
 #endif // MIMPI_COMMON_H
