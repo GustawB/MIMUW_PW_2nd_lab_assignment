@@ -38,24 +38,26 @@ int main(int argc, char** argv) {
         program_args = &argv[3];
     }
 
-    printf("beforum\n");
+    //printf("beforum\n");
     // Initialize mimpi_common library.
-    common_init(nr_of_copies);
-    printf("afterum\n");
+    //common_init(nr_of_copies);
+    //printf("afterum\n");
 
-    // Create nr_of_copies pipes.
+    // Create nr_of_copies^2 pipes.
     for (int i = 0; i < nr_of_copies; ++i) {
-        // Create channel.
-        int channel_dsc[2];
-        ASSERT_SYS_OK(channel(channel_dsc));
-        // Move read descriptor to the index = 36+id.
-        ASSERT_SYS_OK(dup2(channel_dsc[0], 36 + i));
-        // Close the old read descriptor.
-        ASSERT_SYS_OK(close(channel_dsc[0]));
-        // Move write descriptor to the index = 36+16+id.
-        ASSERT_SYS_OK(dup2(channel_dsc[1], 52 + i));
-        // Close the old write descriptor.
-        ASSERT_SYS_OK(close(channel_dsc[1]));
+        for (int j = 0; j < nr_of_copies; ++j) {
+            // Create channel.
+            int channel_dsc[2];
+            ASSERT_SYS_OK(channel(channel_dsc));
+            // Move read descriptor to the index = 20+id+i*16.
+            ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + j + i*16));
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(channel_dsc[0]));
+            // Move write descriptor to the index = 20+(16*16)+id+i*16.
+            ASSERT_SYS_OK(dup2(channel_dsc[1], 276 + j + i * 16));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(channel_dsc[1]));
+        }
     }
 
     const char* MIMPI_envvar_name_id = "process_id";
@@ -97,7 +99,7 @@ int main(int argc, char** argv) {
     }
 
     // Clear mimpi_common library.
-    common_finalize();
+    //common_finalize();
 
     return 0;
 }
