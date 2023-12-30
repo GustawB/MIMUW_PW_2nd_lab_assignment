@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
             int channel_dsc[2];
             ASSERT_SYS_OK(channel(channel_dsc));
             // Move read descriptor to the index = 20+id+i*16.
-            ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + j + i*16));
+            ASSERT_SYS_OK(dup2(channel_dsc[0], 20 + j + i * 16));
             // Close the old read descriptor.
             ASSERT_SYS_OK(close(channel_dsc[0]));
             // Move write descriptor to the index = 20+(16*16)+id+i*16.

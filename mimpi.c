@@ -8,58 +8,151 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 #include <pthread.h>
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 struct buffer_list {
-    char buffer;
+    char* buffer;
     struct buffer_list* next;
 };
+typedef struct buffer_list buffer_list;
 
 struct reader_params {
     int my_rank;
     int source;
 };
+typedef struct reader_params reader_params;
+
+struct writer_params {
+    void const* data;
+    int count;
+    int tag;
+};
+typedef struct writer_params writer_params;
+
+struct metadata {
+    int nr_of_chunks;
+    int count;
+    int tag;
+};
+typedef struct metadata metadata;
 
 pthread_t* pipe_threads;
-struct buffer_list* root;
+pthread_mutex_t* read_mutex;
+pthread_cond_t* read_cond;
+pthread_mutex_t* no_data_mutex;
+int* is_waiting_for_data;
+buffer_list** head_list;
+buffer_list** end_list;
 
 void* read_data(void* data) {
-    struct reader_params params = *((struct reader_params*)data);
-    char buffer;
-    int count = 4096;
+    reader_params params = *((reader_params*)data);
+    printf("Created thread %d from process %d.\n", params.source, params.my_rank);
+    void* temp = malloc(sizeof(metadata));
     while (1) {
-        chrecv(20 + params.my_rank * 16 + params.source, &buffer, count);
+        chrecv(20 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
+        metadata md = *((metadata*)temp);
+        char* buffer = malloc(md.count);
+        chrecv(20 + params.my_rank * 16 + params.source, buffer, md.count);
+        printf("Process: %d; thread: %d; tag: %d\n", params.my_rank, params.source, md.tag);
+        if (md.tag == -1) {
+            free(buffer);
+            printf("killing thread\n");
+            break;
+        }
+        printf("NOT killing thread %d from process %d.\n", params.source, params.my_rank);
+        //printf("%d\n", *((char*)buffer));
+        ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
+        printf("Entering CR in thread %d from process %d.\n", params.source, params.my_rank);
+        end_list[params.source]->next = malloc(sizeof(buffer_list));
+        end_list[params.source] = end_list[params.source]->next;
+        end_list[params.source]->next = NULL;
+        strcpy(end_list[params.source]->buffer, buffer);
+        //printf("%d\n", *((char*)end_list[params.source]->buffer));
+        if (is_waiting_for_data[params.source] == 1) {
+            printf("Someone is waiting for data\n");
+            is_waiting_for_data[params.source] = 0;
+            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
+            //ASSERT_ZERO(pthread_mutex_lock(&close_mutex));
+        }
+        ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
+
+    return NULL;
 }
 
 void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
     //TODO
     int nr_of_threads_to_create = MIMPI_World_size();
+
     pthread_t threads[nr_of_threads_to_create];
+    buffer_list* head_array[nr_of_threads_to_create];
+    buffer_list* end_array[nr_of_threads_to_create];
+    int gates[nr_of_threads_to_create];
+    pthread_mutex_t no_data[nr_of_threads_to_create];
+    pthread_mutex_t read[nr_of_threads_to_create];
+
     for (int i = 0; i < nr_of_threads_to_create; ++i) {
-        struct reader_params* params = malloc(sizeof(struct reader_params));
+        gates[i] = 0;
+        head_array[i] = malloc(sizeof(buffer_list));
+        head_array[i]->next = NULL;
+        end_array[i] = head_array[i];
+        char* buffer = malloc(sizeof(reader_params));
+        reader_params* params = (reader_params*)buffer;
         params->my_rank = MIMPI_World_rank();
         params->source = i;
         ASSERT_ZERO(pthread_create(&threads[i], NULL, read_data, params));
-        free(params);
+        ASSERT_ZERO(pthread_mutex_init(&no_data[i], NULL));
+        ASSERT_ZERO(pthread_mutex_init(&read[i], NULL));
     }
-    root = NULL;
 
-    pipe_threads = &threads[0]; // Get access to the array of threads.
+    pipe_threads = &threads[0];
+    read_mutex = &read[0];
+    head_list = &head_array[0];
+    end_list = &end_array[0];
+    is_waiting_for_data = &gates[0];
+    no_data_mutex = &no_data[0];
+}
+
+void kill_thread(int my_rank, int i, void* params, size_t count) {
+    char* buffer = malloc(sizeof(metadata) + count);
+    metadata* md = (metadata*)buffer;
+    md->nr_of_chunks = 0;
+    md->count = count;
+    md->tag = -1;
+    memcpy(buffer + sizeof(metadata), params, count);
+    ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
+    ASSERT_SYS_OK(sent);
 }
 
 void MIMPI_Finalize() {
     //TODO
-    int rank = MIMPI_World_rank(); // Get the id of the process.
-    // Close the read descriptor.
-    ASSERT_SYS_OK(close(rank + 36));
-    // Close the write descriptor.
-    ASSERT_SYS_OK(close(rank + 52));
+    int my_rank = MIMPI_World_rank(); // Get the id of the process.
+    int world_size = MIMPI_World_size();
 
+    // Close all threads.
+    writer_params params;
+    params.data = 0;
+    params.count = 1;
+    params.tag = -1;
+    for (int i = 0; i < world_size; ++i) {
+        kill_thread(my_rank, i, &params, sizeof(writer_params));
+        ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
+        //printf("%d\n", pthread_join(pipe_threads[i], NULL));
+    }
+    // Close all descriptors.
+    for (int i = 0; i < world_size; ++i) {
+        for (int j = 0; j < world_size; ++j) {
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(20 + j + i * 16));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(276 + j + i * 16));
+        }
+    }
     channels_finalize();
 }
 
@@ -87,9 +180,16 @@ MIMPI_Retcode MIMPI_Send(
 ) {
     //TODO
     int my_rank = MIMPI_World_rank();
-    ssize_t sent = chsend(276 + destination*16 + my_rank, data, count);
+    char* buffer = malloc(sizeof(metadata) + count);
+    metadata* md = (metadata*)buffer;
+    md->nr_of_chunks = 1;
+    md->count = count;
+    md->tag = tag;
+    memcpy(buffer + sizeof(metadata), data, count);
+    ssize_t sent = chsend(276 + destination*16 + my_rank, buffer, count + sizeof(metadata));
+    printf("The message has been send: %d\n", my_rank);
     ASSERT_SYS_OK(sent);
-    if (sent != count)
+    if (sent != count + sizeof(metadata))
         fatal("Wrote less than expected.");
     return MIMPI_SUCCESS;
 }
@@ -100,45 +200,31 @@ MIMPI_Retcode MIMPI_Recv(
     int source,
     int tag
 ) {
+    printf("Entered mimpi_receive with source %d\n", source);
     //TODO
     int my_rank = MIMPI_World_rank();
-    ssize_t read = chrecv(20 + my_rank*16 + source, data, count);
-    ASSERT_SYS_OK(read);
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
+    if (head_list[source] == end_list[source]) {
+        printf("Awaiting data...\n");
+        while (head_list[source] == end_list[source]) {
+            printf("ruchanie\n");
+            is_waiting_for_data[source] = 1;
+            ASSERT_ZERO(pthread_cond_wait(&read_cond[source], &read_mutex[source]));
+        }
+    }
+    printf("Reading data...\n");
+    char* received_data = (char*)head_list[my_rank]->next->buffer;
+    strcpy(data, received_data);
+    buffer_list* pointer_to_delete = head_list[my_rank]->next;
+    head_list[my_rank]->next = head_list[my_rank]->next->next;
+    free(pointer_to_delete);
+    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
+
     return MIMPI_SUCCESS;
 }
 
 MIMPI_Retcode MIMPI_Barrier() {
-    //TODO
-    int id = MIMPI_World_rank();
-    int world_size = MIMPI_World_size();
-    char dummy_data = 69;
-    char buffer;
-
-    pthread_t thread;
-    ASSERT_ZERO(pthread_create(&thread, NULL, synchronizeProcesses, NULL));
-    int* result;
-    ASSERT_ZERO(pthread_join(thread, (void**)&result));
-    printf("%d\n", *result);
-    if (*result == 1) { // We are the last process in the barrier.
-        chsend(52, &dummy_data, 1); // Wake up the first process.
-    }
-
-    chrecv(36 + id, &buffer, 1);
-    if (id == world_size - 1) {
-        // We are the last process, it's time to free-up the barrier.
-        unlock_barrier();
-    }
-    else {
-        int first = 2 * id;
-        int second = first + 1;
-        if (first < world_size) {
-            chsend(52 + first, &dummy_data, 1);
-        }
-        if (second < world_size) {
-            chsend(52 + second, &dummy_data, 1);
-        }
-    }
-    return MIMPI_SUCCESS;
+    TODO
 }
 
 MIMPI_Retcode MIMPI_Bcast(

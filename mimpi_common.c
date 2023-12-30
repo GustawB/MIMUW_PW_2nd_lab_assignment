@@ -44,6 +44,3 @@ _Noreturn void fatal(const char* fmt, ...)
 
 /////////////////////////////////////////////////
 // Put your implementation here
-
-// Mutex used to synchronize the barrier
-pthread_mutex_t barrier_mutex;
