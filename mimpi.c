@@ -50,30 +50,30 @@ buffer_list** end_list;
 
 void* read_data(void* data) {
     reader_params params = *((reader_params*)data);
-    printf("Created thread %d from process %d.\n", params.source, params.my_rank);
+    //printf("Created thread %d from process %d.\n", params.source, params.my_rank);
     void* temp = malloc(sizeof(metadata));
     while (1) {
         chrecv(20 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
         metadata md = *((metadata*)temp);
         char* buffer = malloc(md.count);
         chrecv(20 + params.my_rank * 16 + params.source, buffer, md.count);
-        printf("Process: %d; thread: %d; tag: %d\n", params.my_rank, params.source, md.tag);
+        //printf("Process: %d; thread: %d; tag: %d\n", params.my_rank, params.source, md.tag);
         if (md.tag == -1) {
             free(buffer);
-            printf("killing thread\n");
+          //  printf("killing thread\n");
             break;
         }
-        printf("NOT killing thread %d from process %d.\n", params.source, params.my_rank);
+        //printf("NOT killing thread %d from process %d.\n", params.source, params.my_rank);
         //printf("%d\n", *((char*)buffer));
         ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
-        printf("Entering CR in thread %d from process %d.\n", params.source, params.my_rank);
+        //printf("Entering CR in thread %d from process %d.\n", params.source, params.my_rank);
         end_list[params.source]->next = malloc(sizeof(buffer_list));
         end_list[params.source] = end_list[params.source]->next;
         end_list[params.source]->next = NULL;
         strcpy(end_list[params.source]->buffer, buffer);
         //printf("%d\n", *((char*)end_list[params.source]->buffer));
         if (is_waiting_for_data[params.source] == 1) {
-            printf("Someone is waiting for data\n");
+            //printf("Someone is waiting for data\n");
             is_waiting_for_data[params.source] = 0;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
             //ASSERT_ZERO(pthread_mutex_lock(&close_mutex));
@@ -89,7 +89,8 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     //TODO
     int nr_of_threads_to_create = MIMPI_World_size();
 
-    pthread_t threads[nr_of_threads_to_create];
+    //pthread_t threads[nr_of_threads_to_create];
+    pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
     buffer_list* head_array[nr_of_threads_to_create];
     buffer_list* end_array[nr_of_threads_to_create];
     int gates[nr_of_threads_to_create];
@@ -105,12 +106,13 @@ void MIMPI_Init(bool enable_deadlock_detection) {
         reader_params* params = (reader_params*)buffer;
         params->my_rank = MIMPI_World_rank();
         params->source = i;
-        ASSERT_ZERO(pthread_create(&threads[i], NULL, read_data, params));
+        //ASSERT_ZERO(pthread_create(&threads[i], NULL, read_data, params));
+        ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
         ASSERT_ZERO(pthread_mutex_init(&no_data[i], NULL));
         ASSERT_ZERO(pthread_mutex_init(&read[i], NULL));
     }
 
-    pipe_threads = &threads[0];
+    //pipe_threads = &threads[0];
     read_mutex = &read[0];
     head_list = &head_array[0];
     end_list = &end_array[0];
