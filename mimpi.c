@@ -42,8 +42,8 @@ typedef struct metadata metadata;
 
 pthread_t* pipe_threads;
 pthread_mutex_t* read_mutex;
-pthread_cond_t* read_cond;
 pthread_mutex_t* no_data_mutex;
+pthread_cond_t* read_cond;
 int* is_waiting_for_data;
 buffer_list** head_list;
 buffer_list** end_list;
@@ -60,23 +60,26 @@ void* read_data(void* data) {
         //printf("Process: %d; thread: %d; tag: %d\n", params.my_rank, params.source, md.tag);
         if (md.tag == -1) {
             free(buffer);
-          //  printf("killing thread\n");
+            //printf("killing thread\n");
             break;
         }
         //printf("NOT killing thread %d from process %d.\n", params.source, params.my_rank);
-        //printf("%d\n", *((char*)buffer));
+        //printf("buffer: %d\n", *((char*)buffer));
         ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
         //printf("Entering CR in thread %d from process %d.\n", params.source, params.my_rank);
         end_list[params.source]->next = malloc(sizeof(buffer_list));
         end_list[params.source] = end_list[params.source]->next;
         end_list[params.source]->next = NULL;
-        strcpy(end_list[params.source]->buffer, buffer);
+        end_list[params.source]->buffer = malloc(md.count);
+        ASSERT_NOT_NULL(strcpy(end_list[params.source]->buffer, buffer));
         //printf("%d\n", *((char*)end_list[params.source]->buffer));
+        //printf("I'm about to check whether source %d is waiting for data (%d)\n", 
+            //params.source, is_waiting_for_data[params.source]);
         if (is_waiting_for_data[params.source] == 1) {
             //printf("Someone is waiting for data\n");
             is_waiting_for_data[params.source] = 0;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
-            //ASSERT_ZERO(pthread_mutex_lock(&close_mutex));
+            //printf("I woke up yo mama hehehe\n");
         }
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
@@ -89,35 +92,27 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     //TODO
     int nr_of_threads_to_create = MIMPI_World_size();
 
-    //pthread_t threads[nr_of_threads_to_create];
     pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
-    buffer_list* head_array[nr_of_threads_to_create];
-    buffer_list* end_array[nr_of_threads_to_create];
-    int gates[nr_of_threads_to_create];
-    pthread_mutex_t no_data[nr_of_threads_to_create];
-    pthread_mutex_t read[nr_of_threads_to_create];
+    read_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
+    no_data_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
+    read_cond = malloc(nr_of_threads_to_create * sizeof(pthread_cond_t));
+    is_waiting_for_data = malloc(nr_of_threads_to_create * sizeof(int));
+    head_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
+    end_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
 
     for (int i = 0; i < nr_of_threads_to_create; ++i) {
-        gates[i] = 0;
-        head_array[i] = malloc(sizeof(buffer_list));
-        head_array[i]->next = NULL;
-        end_array[i] = head_array[i];
+        is_waiting_for_data[i] = 0;
+        head_list[i] = malloc(sizeof(buffer_list));
+        head_list[i]->next = NULL;
+        end_list[i] = head_list[i];
         char* buffer = malloc(sizeof(reader_params));
         reader_params* params = (reader_params*)buffer;
         params->my_rank = MIMPI_World_rank();
         params->source = i;
-        //ASSERT_ZERO(pthread_create(&threads[i], NULL, read_data, params));
         ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
-        ASSERT_ZERO(pthread_mutex_init(&no_data[i], NULL));
-        ASSERT_ZERO(pthread_mutex_init(&read[i], NULL));
+        ASSERT_ZERO(pthread_mutex_init(&no_data_mutex[i], NULL));
+        ASSERT_ZERO(pthread_mutex_init(&read_mutex[i], NULL));
     }
-
-    //pipe_threads = &threads[0];
-    read_mutex = &read[0];
-    head_list = &head_array[0];
-    end_list = &end_array[0];
-    is_waiting_for_data = &gates[0];
-    no_data_mutex = &no_data[0];
 }
 
 void kill_thread(int my_rank, int i, void* params, size_t count) {
@@ -144,7 +139,6 @@ void MIMPI_Finalize() {
     for (int i = 0; i < world_size; ++i) {
         kill_thread(my_rank, i, &params, sizeof(writer_params));
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
-        //printf("%d\n", pthread_join(pipe_threads[i], NULL));
     }
     // Close all descriptors.
     for (int i = 0; i < world_size; ++i) {
@@ -189,7 +183,7 @@ MIMPI_Retcode MIMPI_Send(
     md->tag = tag;
     memcpy(buffer + sizeof(metadata), data, count);
     ssize_t sent = chsend(276 + destination*16 + my_rank, buffer, count + sizeof(metadata));
-    printf("The message has been send: %d\n", my_rank);
+    //printf("The message has been send: %d\n", my_rank);
     ASSERT_SYS_OK(sent);
     if (sent != count + sizeof(metadata))
         fatal("Wrote less than expected.");
@@ -202,25 +196,28 @@ MIMPI_Retcode MIMPI_Recv(
     int source,
     int tag
 ) {
-    printf("Entered mimpi_receive with source %d\n", source);
+    //printf("Entered mimpi_receive with source %d\n", source);
     //TODO
     int my_rank = MIMPI_World_rank();
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (head_list[source] == end_list[source]) {
-        printf("Awaiting data...\n");
+        //printf("Awaiting data...\n");
         while (head_list[source] == end_list[source]) {
-            printf("ruchanie\n");
             is_waiting_for_data[source] = 1;
+            //printf("Receive waiting in loop; source: %d; waiting: %d;.\n",
+                //source, is_waiting_for_data[source]);
             ASSERT_ZERO(pthread_cond_wait(&read_cond[source], &read_mutex[source]));
+            //printf("I woke up :))))))\n");
         }
     }
-    printf("Reading data...\n");
-    char* received_data = (char*)head_list[my_rank]->next->buffer;
-    strcpy(data, received_data);
-    buffer_list* pointer_to_delete = head_list[my_rank]->next;
-    head_list[my_rank]->next = head_list[my_rank]->next->next;
+    //printf("Reading data...\n");
+    char* received_data = (char*)head_list[source]->next->buffer;
+    ASSERT_NOT_NULL(strcpy(data, received_data));
+    buffer_list* pointer_to_delete = head_list[source]->next;
+    head_list[my_rank]->next = head_list[source]->next->next;
     free(pointer_to_delete);
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
+
 
     return MIMPI_SUCCESS;
 }
