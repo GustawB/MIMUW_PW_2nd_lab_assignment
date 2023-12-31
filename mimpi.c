@@ -16,6 +16,8 @@
 
 struct buffer_list {
     char* buffer;
+    int tag;
+    int count;
     struct buffer_list* next;
 };
 typedef struct buffer_list buffer_list;
@@ -71,6 +73,8 @@ void* read_data(void* data) {
         end_list[params.source] = end_list[params.source]->next;
         end_list[params.source]->next = NULL;
         end_list[params.source]->buffer = malloc(md.count);
+        end_list[params.source]->tag = md.tag;
+        end_list[params.source]->count = md.count;
         ASSERT_NOT_NULL(strcpy(end_list[params.source]->buffer, buffer));
         //printf("%d\n", *((char*)end_list[params.source]->buffer));
         //printf("I'm about to check whether source %d is waiting for data (%d)\n", 
@@ -104,6 +108,8 @@ void MIMPI_Init(bool enable_deadlock_detection) {
         is_waiting_for_data[i] = 0;
         head_list[i] = malloc(sizeof(buffer_list));
         head_list[i]->next = NULL;
+        head_list[i]->tag = -1;
+        head_list[i]->count = -1;
         end_list[i] = head_list[i];
         char* buffer = malloc(sizeof(reader_params));
         reader_params* params = (reader_params*)buffer;
@@ -190,6 +196,20 @@ MIMPI_Retcode MIMPI_Send(
     return MIMPI_SUCCESS;
 }
 
+bool is_there_data_to_read(int source, int count, int tag) {
+    if (head_list[source] == end_list[source]) {
+        return false;
+    }
+    buffer_list* iter = head_list[source]->next;
+    while (iter != NULL) {
+        if (iter->count == count && iter->tag == tag) {
+            return true;
+        }
+        iter = iter->next;
+    }
+    return false;
+}
+
 MIMPI_Retcode MIMPI_Recv(
     void *data,
     int count,
@@ -198,11 +218,10 @@ MIMPI_Retcode MIMPI_Recv(
 ) {
     //printf("Entered mimpi_receive with source %d\n", source);
     //TODO
-    int my_rank = MIMPI_World_rank();
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
-    if (head_list[source] == end_list[source]) {
+    if (!is_there_data_to_read(source, count, tag)) {
         //printf("Awaiting data...\n");
-        while (head_list[source] == end_list[source]) {
+        while (!is_there_data_to_read(source, count, tag)) {
             is_waiting_for_data[source] = 1;
             //printf("Receive waiting in loop; source: %d; waiting: %d;.\n",
                 //source, is_waiting_for_data[source]);
@@ -211,13 +230,19 @@ MIMPI_Retcode MIMPI_Recv(
         }
     }
     //printf("Reading data...\n");
-    char* received_data = (char*)head_list[source]->next->buffer;
-    ASSERT_NOT_NULL(strcpy(data, received_data));
-    buffer_list* pointer_to_delete = head_list[source]->next;
-    head_list[my_rank]->next = head_list[source]->next->next;
-    free(pointer_to_delete);
+    buffer_list* prev = head_list[source];
+    buffer_list* iter = head_list[source]->next;
+    while (iter != NULL && iter->count != count) {
+        if (tag == MIMPI_ANY_TAG || iter->tag == tag) {
+            break;
+        }
+        iter = iter->next;
+        prev = prev->next;
+    }
+    ASSERT_NOT_NULL(strcpy(data, iter->buffer));
+    prev->next = iter->next;
+    free(iter);
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
-
 
     return MIMPI_SUCCESS;
 }
