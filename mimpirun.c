@@ -26,22 +26,11 @@ int main(int argc, char** argv) {
         free(fp_prog);
         fatal("Passed empty file path to the %s\n", argv[0]);
     }
-    if (fp_prog[0] == '.' && fp_prog[1] == '/')
-    {
-        char* substr = malloc((strlen(fp_prog) - 1) * sizeof(char));
-        strncpy(substr, &fp_prog[2], strlen(fp_prog) - 2);
-        fp_prog = substr;
-    }
     // Make array of args for processes that will be executed later.
     char** program_args = NULL;
     if (argc > 3) {
         program_args = &argv[3];
     }
-
-    //printf("beforum\n");
-    // Initialize mimpi_common library.
-    //common_init(nr_of_copies);
-    //printf("afterum\n");
 
     // Create nr_of_copies^2 pipes.
     for (int i = 0; i < nr_of_copies; ++i) {
@@ -98,8 +87,14 @@ int main(int argc, char** argv) {
         ASSERT_SYS_OK(wait(NULL));
     }
 
-    // Clear mimpi_common library.
-    //common_finalize();
+    for (int i = 0; i < nr_of_copies; ++i) {
+        for (int j = 0; j < nr_of_copies; ++j) {
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(20 + j + i * 16));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(276 + j + i * 16));
+        }
+    }
 
     return 0;
 }
