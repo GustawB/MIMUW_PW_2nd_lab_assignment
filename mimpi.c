@@ -152,14 +152,14 @@ void MIMPI_Init(bool enable_deadlock_detection) {
 }
 
 void kill_thread(int my_rank, int i, void* params, size_t count) {
-    printf("kill_thread: %ld\n", count);
+    //printf("kill_thread: %ld\n", count);
     char* buffer = malloc(sizeof(metadata) + count);
     metadata* md = (metadata*)buffer;
     writer_params* params_p = (writer_params*)params;
     md->size = params_p->count;
     md->count = count;
     md->tag = -1;
-    printf("kill_thread: %d\n", md->size);
+    //printf("kill_thread: %d\n", md->size);
     
     memcpy(buffer + sizeof(metadata), params, count);
     ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
@@ -182,13 +182,22 @@ void MIMPI_Finalize() {
         kill_thread(my_rank, i, &params, sizeof(writer_params));
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
     }
-    // Close all descriptors.
+    // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
         for (int j = 0; j < world_size; ++j) {
             // Close read descriptor.
             ASSERT_SYS_OK(close(20 + j + i * 16));
             // Close write descriptor.
             ASSERT_SYS_OK(close(276 + j + i * 16));
+        }
+    }
+    // Close all barrier descriptors.
+    for (int i = 0; i < world_size; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(532 + j + i * 3));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(580 + j + i * 3));
         }
     }
 
@@ -213,7 +222,7 @@ void MIMPI_Finalize() {
     free(end_list);
     free(waiting_for_count);
     free(waiting_for_tag);
-    printf("End of finalize\n");
+    //printf("End of finalize in rank: %d\n", my_rank);
     channels_finalize();
 }
 
@@ -342,7 +351,45 @@ MIMPI_Retcode MIMPI_Recv(
 }
 
 MIMPI_Retcode MIMPI_Barrier() {
-    TODO
+    //TODO
+    int world_size = MIMPI_World_size();
+    int my_rank = MIMPI_World_rank();
+    int left_subtree = 2 * my_rank + 1;
+    int right_subtree = 2 * my_rank + 2;
+    char send_buffer = my_rank;
+    char* recv_buffer = malloc(sizeof(int));
+    int count = sizeof(int);
+    //printf("Beg of barrier for: %d\n", my_rank);
+    if (my_rank > 0) {
+        chrecv(532 + my_rank * 3, recv_buffer, count);
+    }
+    if (left_subtree < world_size) {
+        chsend(580 + left_subtree * 3, &send_buffer, count);
+    }
+    if (right_subtree < world_size) {
+        chsend(580 + right_subtree * 3, &send_buffer, count);
+    }
+    //printf("All data send in barrier for process: %d.\n", my_rank);
+    if (left_subtree < world_size) {
+        //printf("Process %d waiting for child %d\n", my_rank, left_subtree);
+        chrecv(532 + my_rank * 3 + 1, recv_buffer, count);
+    }
+    if (right_subtree < world_size) {
+        //printf("Process %d waiting for child %d\n", my_rank, right_subtree);
+        chrecv(532 + my_rank * 3 + 2, recv_buffer, count);
+    }
+    //printf("All data received in barrier for process: %d.\n", my_rank);
+    if (my_rank > 0) {
+        if (my_rank % 2 != 0) {
+            chsend(580 + ((my_rank/2)*3) + 1, &send_buffer, count);
+        }
+        else {
+            chsend(580 + ((my_rank / 2 - 1)*3) + 2, &send_buffer, count);
+        }
+    }
+
+    free(recv_buffer);
+    return MIMPI_SUCCESS;
 }
 
 MIMPI_Retcode MIMPI_Bcast(
