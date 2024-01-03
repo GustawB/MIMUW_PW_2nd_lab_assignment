@@ -350,26 +350,37 @@ MIMPI_Retcode MIMPI_Recv(
     return MIMPI_SUCCESS;
 }
 
+int calc_tree_size(int elements) {
+    int height = 1;
+    int iter = 1;
+    while (iter <= elements) {
+        ++height;
+        iter *= 2;
+    }
+
+    return height;
+}
+
+int calc_tree_leaves(int elements) {
+    int iter = 1;
+    while (iter <= elements) {
+        iter *= 2;
+    }
+    iter /= 2;
+
+    return elements - iter;
+}
+
 MIMPI_Retcode MIMPI_Barrier() {
     //TODO
     int world_size = MIMPI_World_size();
     int my_rank = MIMPI_World_rank();
+    //int tree_height = calc_tree_height(world_size);
     int left_subtree = 2 * my_rank + 1;
     int right_subtree = 2 * my_rank + 2;
     char send_buffer = my_rank;
     char* recv_buffer = malloc(sizeof(int));
     int count = sizeof(int);
-    //printf("Beg of barrier for: %d\n", my_rank);
-    if (my_rank > 0) {
-        chrecv(532 + my_rank * 3, recv_buffer, count);
-    }
-    if (left_subtree < world_size) {
-        chsend(580 + left_subtree * 3, &send_buffer, count);
-    }
-    if (right_subtree < world_size) {
-        chsend(580 + right_subtree * 3, &send_buffer, count);
-    }
-    //printf("All data send in barrier for process: %d.\n", my_rank);
     if (left_subtree < world_size) {
         //printf("Process %d waiting for child %d\n", my_rank, left_subtree);
         chrecv(532 + my_rank * 3 + 1, recv_buffer, count);
@@ -378,14 +389,20 @@ MIMPI_Retcode MIMPI_Barrier() {
         //printf("Process %d waiting for child %d\n", my_rank, right_subtree);
         chrecv(532 + my_rank * 3 + 2, recv_buffer, count);
     }
-    //printf("All data received in barrier for process: %d.\n", my_rank);
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
-            chsend(580 + ((my_rank/2)*3) + 1, &send_buffer, count);
+            chsend(580 + ((my_rank / 2) * 3) + 1, &send_buffer, count);
         }
         else {
-            chsend(580 + ((my_rank / 2 - 1)*3) + 2, &send_buffer, count);
+            chsend(580 + ((my_rank / 2 - 1) * 3) + 2, &send_buffer, count);
         }
+        chrecv(532 + my_rank * 3, recv_buffer, count);
+    }
+    if (left_subtree < world_size) {
+        chsend(580 + left_subtree * 3, &send_buffer, count);
+    }
+    if (right_subtree < world_size) {
+        chsend(580 + right_subtree * 3, &send_buffer, count);
     }
 
     free(recv_buffer);
