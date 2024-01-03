@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Create 3n pipes for the group communication.
+    // Create 3n pipes for the barrier communication.
     for (int i = 0; i < nr_of_copies; ++i) {
         for (int j = 0; j < 3; ++j) {
             int channel_dsc[2];
@@ -62,6 +62,42 @@ int main(int argc, char** argv) {
             ASSERT_SYS_OK(dup2(channel_dsc[1], 580 + j + i * 3));
             // Close the old write descriptor.
             ASSERT_SYS_OK(close(channel_dsc[1]));
+        }
+    }
+
+    // Create 3n pipes for the group communication.
+    for (int i = 0; i < nr_of_copies; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            int channel_dscba[2];
+            int channel_dscbr[2];
+            int channel_dscrd[2];
+            ASSERT_SYS_OK(channel(channel_dscba));
+            ASSERT_SYS_OK(channel(channel_dscbr));
+            ASSERT_SYS_OK(channel(channel_dscrd));
+            // Move read descriptor to the index = 532+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscba[0], 532 + j + i * 3));
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(channel_dscba[0]));
+            // Move write descriptor to the index = 580+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscba[1], 580 + j + i * 3));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(channel_dscba[1]));
+            // Move read descriptor to the index = 532+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscbr[0], 628 + j + i * 3));
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(channel_dscbr[0]));
+            // Move write descriptor to the index = 580+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscbr[1], 676 + j + i * 3));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(channel_dscbr[1]));
+            // Move read descriptor to the index = 532+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscrd[0], 724 + j + i * 3));
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(channel_dscrd[0]));
+            // Move write descriptor to the index = 580+id+j.
+            ASSERT_SYS_OK(dup2(channel_dscrd[1], 772 + j + i * 3));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(channel_dscrd[1]));
         }
     }
 
@@ -118,6 +154,14 @@ int main(int argc, char** argv) {
             ASSERT_SYS_OK(close(532 + j + i * 3));
             // Close write descriptor.
             ASSERT_SYS_OK(close(580 + j + i * 3));
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(628 + j + i * 3));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(676 + j + i * 3));
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(724 + j + i * 3));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(772 + j + i * 3));
         }
     }
 

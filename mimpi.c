@@ -45,8 +45,11 @@ struct metadata {
 typedef struct metadata metadata;
 
 #define PIPE_BUFF_UPDT (PIPE_BUF - sizeof(metadata))
+#define KILL_THREAD -1
+#define BARRIER_MESSAGE -1
 
 pthread_t* pipe_threads;
+pthread_t* barrier_pipe_threads;
 pthread_mutex_t* read_mutex;
 pthread_mutex_t* no_data_mutex;
 pthread_cond_t* read_cond;
@@ -54,7 +57,17 @@ int* waiting_for_count;
 int* waiting_for_tag;
 buffer_list** head_list;
 buffer_list** end_list;
+barrier_list** head_list;
+barrier_list** end_list;
 
+void* detect_barrier(void* data) {
+    reader_params params = *((reader_params*)data);
+    while (1) {
+        void* temp = malloc(sizeof(metadata));
+        chrecv(532 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
+        metadata md = *((metadata*)temp);
+    }
+}
 
 void* read_data(void* data) {
     reader_params params = *((reader_params*)data);
@@ -66,7 +79,7 @@ void* read_data(void* data) {
         char* buffer = malloc(md.size);
         //printf("fsugyahdjkl\n");
         chrecv(20 + params.my_rank * 16 + params.source, buffer, md.size);
-        if (md.tag == -1) {
+        if (md.tag == KILL_THREAD) {
             free(buffer);
             free(temp);
             break;
@@ -158,7 +171,7 @@ void kill_thread(int my_rank, int i, void* params, size_t count) {
     writer_params* params_p = (writer_params*)params;
     md->size = params_p->count;
     md->count = count;
-    md->tag = -1;
+    md->tag = KILL_THREAD;
     //printf("kill_thread: %d\n", md->size);
     
     memcpy(buffer + sizeof(metadata), params, count);
@@ -198,6 +211,14 @@ void MIMPI_Finalize() {
             ASSERT_SYS_OK(close(532 + j + i * 3));
             // Close write descriptor.
             ASSERT_SYS_OK(close(580 + j + i * 3));
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(628 + j + i * 3));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(676 + j + i * 3));
+            // Close read descriptor.
+            ASSERT_SYS_OK(close(724 + j + i * 3));
+            // Close write descriptor.
+            ASSERT_SYS_OK(close(772 + j + i * 3));
         }
     }
 
@@ -249,6 +270,18 @@ MIMPI_Retcode MIMPI_Send(
     int tag
 ) {
     //TODO
+    if (tag == BARRIER_MESSAGE) {
+        char* buffer = malloc(PIPE_BUF);
+        metadata* md = (metadata*)buffer;
+        md->size = count;
+        md->count = count;
+        md->tag = tag;
+        ssize_t sent = chsend(destination, buffer, sizeof(metadata));
+        free(buffer);
+        ASSERT_SYS_OK(sent);
+        if (sent != PIPE_BUF)
+            fatal("Wrote less than expected.");
+    }
     int my_rank = MIMPI_World_rank();
     int alloc_size = count % PIPE_BUFF_UPDT;
     if (PIPE_BUFF_UPDT == count) {
