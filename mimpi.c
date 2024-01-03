@@ -62,9 +62,9 @@ void* read_data(void* data) {
     while (1) {
         chrecv(20 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
         metadata md = *((metadata*)temp);
-        printf("size: %d\n", md.size);
+        //printf("size: %d\n", md.size);
         char* buffer = malloc(md.size);
-        printf("fsugyahdjkl\n");
+        //printf("fsugyahdjkl\n");
         chrecv(20 + params.my_rank * 16 + params.source, buffer, md.size);
         if (md.tag == -1) {
             free(buffer);
@@ -329,7 +329,7 @@ MIMPI_Retcode MIMPI_Recv(
         ++nr_of_chunks;
     }
     for (int i = 0; i < nr_of_chunks; ++i) {
-        printf("Receive %d of %d; size: %d\n", i, nr_of_chunks, iter->size);
+        //printf("Receive %d of %d; size: %d\n", i, nr_of_chunks, iter->size);
         ASSERT_NOT_NULL(memcpy((data + i * PIPE_BUFF_UPDT), iter->buffer, iter->size));
         prev->next = iter->next;
         free(iter->buffer);
