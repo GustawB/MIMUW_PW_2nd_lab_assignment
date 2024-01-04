@@ -49,22 +49,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Create 3n pipes for the barrier communication.
-    for (int i = 0; i < nr_of_copies; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            int channel_dsc[2];
-            ASSERT_SYS_OK(channel(channel_dsc));
-            // Move read descriptor to the index = 532+id+j.
-            ASSERT_SYS_OK(dup2(channel_dsc[0], 532 + j + i * 3));
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[0]));
-            // Move write descriptor to the index = 580+id+j.
-            ASSERT_SYS_OK(dup2(channel_dsc[1], 580 + j + i * 3));
-            // Close the old write descriptor.
-            ASSERT_SYS_OK(close(channel_dsc[1]));
-        }
-    }
-
     // Create 3n pipes for the group communication.
     for (int i = 0; i < nr_of_copies; ++i) {
         for (int j = 0; j < 3; ++j) {
