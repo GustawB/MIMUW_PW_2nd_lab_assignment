@@ -11,6 +11,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <limits.h>
+#include <stdint.h>
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -49,6 +50,7 @@ typedef struct metadata metadata;
 #define KILL_THREAD -1
 #define BARRIER_MESSAGE -2
 #define BROADCAST_MESSAGE -3
+#define REDUCE_MESSAGE -4
 
 pthread_t* pipe_threads;
 pthread_mutex_t* read_mutex;
@@ -269,7 +271,7 @@ MIMPI_Retcode MIMPI_Send(
     int my_rank = MIMPI_World_rank();
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
-    if (tag == BARRIER_MESSAGE || BROADCAST_MESSAGE) {
+    if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE) {
         local_dest = destination;
     }
     else {
@@ -474,5 +476,77 @@ MIMPI_Retcode MIMPI_Reduce(
     MIMPI_Op op,
     int root
 ) {
-    TODO
+    //TODO
+    int world_size = MIMPI_World_size();
+    int my_rank = MIMPI_World_rank();
+    int left_subtree = 2 * my_rank + 1;
+    int right_subtree = 2 * my_rank + 2;
+    char* recv_buffer = malloc(count);
+    char* send_buffer = malloc(count);
+    memcpy(send_buffer, send_data, count);
+    if (left_subtree < world_size) {
+        MIMPI_Recv(recv_buffer, count, world_size + 7, REDUCE_MESSAGE);
+        for (int i = 0; i < count; ++i) {
+            if (op == MIMPI_MAX) {
+                send_buffer[i] = MAX((((char*)send_buffer)[i]), (((char*)recv_buffer)[i]));
+            }
+            else if (op == MIMPI_MIN) {
+                send_buffer[i] = MAX((((char*)send_buffer)[i]), (((char*)recv_buffer)[i]));
+            }
+            else if (op == MIMPI_SUM) {
+                //printf("%d\n", *((char*)send_data));
+                ((char*)send_buffer)[i] += ((char*)recv_buffer)[i];
+            }
+            else if (op == MIMPI_PROD) {
+                ((char*)send_buffer)[i] *= ((char*)recv_buffer)[i];
+            }
+        }
+    }
+    free(recv_buffer);
+    recv_buffer = malloc(count);
+    if (right_subtree < world_size) {
+        MIMPI_Recv(recv_buffer, count, world_size + 8, REDUCE_MESSAGE);
+        for (int i = 0; i < count; ++i) {
+            if (op == MIMPI_MAX) {
+                send_buffer[i] = MAX((((char*)send_buffer)[i]), (((char*)recv_buffer)[i]));
+            }
+            else if (op == MIMPI_MIN) {
+                send_buffer[i] = MAX((((char*)send_buffer)[i]), (((char*)recv_buffer)[i]));
+            }
+            else if (op == MIMPI_SUM) {
+                ((char*)send_buffer)[i] += ((char*)recv_buffer)[i];
+            }
+            else if (op == MIMPI_PROD) {
+                ((char*)send_buffer)[i] *= ((char*)recv_buffer)[i];
+            }
+        }
+    }
+    free(recv_buffer);
+    recv_buffer = malloc(count);
+    if (my_rank > 0) {
+        if (my_rank % 2 != 0) {
+            MIMPI_Send(send_buffer, count, 772 + ((my_rank / 2) * 3) + 1, REDUCE_MESSAGE);
+        }
+        else {
+            MIMPI_Send(send_buffer, count, 772 + ((my_rank / 2 - 1) * 3) + 2, REDUCE_MESSAGE);
+        }
+        MIMPI_Recv(recv_buffer, count, world_size + 6, REDUCE_MESSAGE);
+    }
+    if (root == my_rank) {
+        if (root == 0) {
+            memcpy(recv_data, send_buffer, count);
+        }
+        else {
+            memcpy(recv_data, recv_buffer, count);
+        }
+    }
+    if (left_subtree < world_size) {
+        MIMPI_Send(&send_buffer, count, 772 + left_subtree * 3, REDUCE_MESSAGE);
+    }
+    if (right_subtree < world_size) {
+        MIMPI_Send(&send_buffer, count, 772 + right_subtree * 3, REDUCE_MESSAGE);
+    }
+
+    free(recv_buffer);
+    return MIMPI_SUCCESS;
 }
