@@ -58,56 +58,6 @@ int* waiting_for_count;
 int* waiting_for_tag;
 buffer_list** head_list;
 buffer_list** end_list;
-/*
-void* detect_broadcast(void* data) {
-    reader_params params = *((reader_params*)data);
-    while (1) {
-        void* temp = malloc(sizeof(metadata));
-        chrecv(628 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
-        metadata md = *((metadata*)temp);
-        char* buffer = malloc(md.size);
-        chrecv(628 + params.my_rank * 16 + params.source, buffer, md.size);
-    }
-    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
-    broadcast_end_list[params.source]->next = malloc(sizeof(buffer_list));
-    broadcast_end_list[params.source] = broadcast_end_list[params.source]->next;
-    broadcast_end_list[params.source]->next = NULL;
-    broadcast_end_list[params.source]->buffer = malloc(md.size);
-    broadcast_end_list[params.source]->tag = md.tag;
-    broadcast_end_list[params.source]->count = md.count;
-    broadcast_end_list[params.source]->size = md.size;
-    ASSERT_NOT_NULL(memcpy(broadcast_end_list[params.source]->buffer, buffer, md.size));
-    free(buffer);
-    int nr_of_chunks = md.count / PIPE_BUFF_UPDT;
-    if (md.count % PIPE_BUFF_UPDT != 0) {
-        ++nr_of_chunks;
-    }
-    for (int i = 1; i < nr_of_chunks; ++i) {
-        chrecv(20 + params.my_rank * 16 + params.source, temp, sizeof(metadata));
-        metadata md2 = *((metadata*)temp);
-        char* buffer2 = malloc(md2.size);
-        chrecv(628 + params.my_rank * 16 + params.source, buffer2, md2.size);
-        broadcast_end_list[params.source]->next = malloc(sizeof(buffer_list));
-        broadcast_end_list[params.source] = broadcast_end_list[params.source]->next;
-        broadcast_end_list[params.source]->next = NULL;
-        broadcast_end_list[params.source]->buffer = malloc(md2.size);
-        broadcast_end_list[params.source]->tag = md2.tag;
-        broadcast_end_list[params.source]->count = md2.count;
-        broadcast_end_list[params.source]->size = md2.size;
-        ASSERT_NOT_NULL(memcpy(broadcast_end_list[params.source]->buffer, buffer2, md2.size));
-        free(buffer2);
-        //printf("%d out of %d; size: %d\n", i, nr_of_chunks, end_list[params.source]->size);
-    }
-
-    if (waiting_for_broadcast_count[params.source] == md.count
-        waiting_for_broadcast_count[params.source] = -1;
-        ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
-    }
-    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
-
-    return NULL;
-}
-*/
 
 void* read_data(void* data) {
     reader_params params = *((reader_params*)data);
@@ -124,15 +74,11 @@ void* read_data(void* data) {
     else { // reduce
         local_source = 724 + params.my_rank * 3 + params.source - params.world_size - 6;
     }
-    //printf("Process: %d; Source: %d; World size: %d; Local source: %d\n", params.my_rank, params.source, params.world_size, local_source);
     void* temp = malloc(sizeof(metadata));
-    //printf("Local source: %d\n", local_source);
     while (1) {
         chrecv(local_source, temp, sizeof(metadata));
         metadata md = *((metadata*)temp);
-        //printf("count: %d\n", md.count);
         char* buffer = malloc(md.size);
-        //printf("fsugyahdjkl\n");
         chrecv(local_source, buffer, md.size);
         if (md.tag == KILL_THREAD) {
             free(buffer);
@@ -171,16 +117,8 @@ void* read_data(void* data) {
             //printf("%d out of %d; size: %d\n", i, nr_of_chunks, end_list[params.source]->size);
         }
 
-        /*if (waiting_for_count[params.source] == md.count &&
-            ((waiting_for_tag[params.source] == MIMPI_ANY_TAG && md.tag > 0) ||
-                (waiting_for_tag[params.source] == md.tag))) {
-            waiting_for_count[params.source] = -1;
-            waiting_for_tag[params.source] = -1;
-            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
-        }*/
-        //printf("Read data: %d; Local_source: %d.\n", *((char*)end_list[params.source]->buffer), local_source);
         if (waiting_for_count[params.source] == md.count &&
-            (waiting_for_tag[params.source] == MIMPI_ANY_TAG ||
+            ((waiting_for_tag[params.source] == MIMPI_ANY_TAG && md.tag > 0) ||
                 (waiting_for_tag[params.source] == md.tag))) {
             waiting_for_count[params.source] = -1;
             waiting_for_tag[params.source] = -1;
@@ -200,7 +138,6 @@ void MIMPI_Init(bool enable_deadlock_detection) {
 
     pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
     read_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
-    no_data_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
     read_cond = malloc(nr_of_threads_to_create * sizeof(pthread_cond_t));
     waiting_for_count = malloc(nr_of_threads_to_create * sizeof(int));
     waiting_for_tag = malloc(nr_of_threads_to_create * sizeof(int));
@@ -222,7 +159,6 @@ void MIMPI_Init(bool enable_deadlock_detection) {
         params->source = i;
         params->world_size = world_size;
         ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
-        ASSERT_ZERO(pthread_mutex_init(&no_data_mutex[i], NULL));
         ASSERT_ZERO(pthread_mutex_init(&read_mutex[i], NULL));
     }
 
@@ -240,9 +176,9 @@ void kill_thread(int my_rank, int i, void* params, size_t count) {
     //printf("kill_thread: %d\n", md->size);
     
     memcpy(buffer + sizeof(metadata), params, count);
-    ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
+    //ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
     free(buffer);
-    ASSERT_SYS_OK(sent);
+    //ASSERT_SYS_OK(sent);
 }
 
 void MIMPI_Finalize() {
@@ -296,11 +232,9 @@ void MIMPI_Finalize() {
             free(cleaner);
             cleaner = head_list[i];
         }
-        ASSERT_ZERO(pthread_mutex_destroy(&no_data_mutex[i]));
         ASSERT_ZERO(pthread_mutex_destroy(&read_mutex[i]));
         ASSERT_ZERO(pthread_cond_destroy(read_cond));
     }
-    free(no_data_mutex);
     free(read_mutex);
     free(read_cond);
     free(pipe_threads);
@@ -335,22 +269,10 @@ MIMPI_Retcode MIMPI_Send(
     int tag
 ) {
     //TODO
-    /*if (tag == BARRIER_MESSAGE) {
-        char* buffer = malloc(PIPE_BUF);
-        metadata* md = (metadata*)buffer;
-        md->size = count;
-        md->count = count;
-        md->tag = tag;
-        ssize_t sent = chsend(destination, buffer, sizeof(metadata));
-        free(buffer);
-        ASSERT_SYS_OK(sent);
-        if (sent != PIPE_BUF)
-            fatal("Wrote less than expected.");
-    }*/
     int my_rank = MIMPI_World_rank();
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
-    if (tag == BROADCAST_MESSAGE) {
+    if (tag == BARRIER_MESSAGE || BROADCAST_MESSAGE) {
         local_dest = destination;
     }
     else {
@@ -392,8 +314,6 @@ MIMPI_Retcode MIMPI_Send(
             fatal("Wrote less than expected.");
     }
     
-    //printf("The message has been send: %d\n", my_rank);
-    
     return MIMPI_SUCCESS;
 }
 
@@ -403,7 +323,7 @@ bool is_there_data_to_read(int source, int count, int tag) {
     }
     buffer_list* iter = head_list[source]->next;
     while (iter != NULL) {
-        if (iter->count == count && (iter->tag == tag || tag == MIMPI_ANY_TAG)) {
+        if (iter->count == count && (iter->tag == tag || (tag == MIMPI_ANY_TAG && iter->tag > 0))) {
             return true;
         }
         iter = iter->next;
@@ -420,15 +340,15 @@ MIMPI_Retcode MIMPI_Recv(
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
-        printf("Waiting for data\n");
+        //printf("Waiting for data from source: %d.\n", source);
         while (!is_there_data_to_read(source, count, tag)) {
             waiting_for_count[source] = count;
             waiting_for_tag[source] = tag;
             ASSERT_ZERO(pthread_cond_wait(&read_cond[source], &read_mutex[source]));
-            printf("Waking up\n");
+            //printf("%d Waking up from source: %d\n", MIMPI_World_rank(), source);
         }
     }
-    printf("Getting data\n");
+    //printf("Getting data\n");
     buffer_list* prev = head_list[source];
     buffer_list* iter = head_list[source]->next;
     while (iter != NULL && iter->count != count) {
@@ -443,12 +363,14 @@ MIMPI_Retcode MIMPI_Recv(
         ++nr_of_chunks;
     }
     for (int i = 0; i < nr_of_chunks; ++i) {
-        //printf("Receive %d of %d; size: %d\n", i, nr_of_chunks, iter->size);
         ASSERT_NOT_NULL(memcpy((data + i * PIPE_BUFF_UPDT), iter->buffer, iter->size));
         prev->next = iter->next;
         free(iter->buffer);
         free(iter);
         iter = prev->next;
+    }
+    if (head_list[source]->next == NULL) {
+        end_list[source] = head_list[source];
     }
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
 
@@ -465,29 +387,26 @@ MIMPI_Retcode MIMPI_Barrier() {
     char* recv_buffer = malloc(sizeof(int));
     int count = sizeof(int);
     if (left_subtree < world_size) {
-        //printf("Process %d waiting for child %d\n", my_rank, left_subtree);
-        chrecv(532 + my_rank * 3 + 1, recv_buffer, count);
+        MIMPI_Recv(recv_buffer, count, world_size + 1, BARRIER_MESSAGE);
     }
     if (right_subtree < world_size) {
-        //printf("Process %d waiting for child %d\n", my_rank, right_subtree);
-        chrecv(532 + my_rank * 3 + 2, recv_buffer, count);
+        MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
     }
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
-            chsend(580 + ((my_rank / 2) * 3) + 1, &send_buffer, count);
+            MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, BARRIER_MESSAGE);
         }
         else {
-            chsend(580 + ((my_rank / 2 - 1) * 3) + 2, &send_buffer, count);
+            MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BARRIER_MESSAGE);
         }
-        chrecv(532 + my_rank * 3, recv_buffer, count);
+        MIMPI_Recv(recv_buffer, count, world_size, BARRIER_MESSAGE);
     }
     if (left_subtree < world_size) {
-        chsend(580 + left_subtree * 3, &send_buffer, count);
+        MIMPI_Send(&send_buffer, count, 580 + left_subtree * 3, BARRIER_MESSAGE);
     }
     if (right_subtree < world_size) {
-        chsend(580 + right_subtree * 3, &send_buffer, count);
+        MIMPI_Send(&send_buffer, count, 580 + right_subtree * 3, BARRIER_MESSAGE);
     }
-
     free(recv_buffer);
     return MIMPI_SUCCESS;
 }
@@ -548,6 +467,7 @@ MIMPI_Retcode MIMPI_Bcast(
         MIMPI_Send(data, count, 676 + right_subtree * 3, BROADCAST_MESSAGE);
     }
 
+    printf("Process %d exited broadcast.\n", my_rank);
     return MIMPI_SUCCESS;
 }
 
