@@ -166,19 +166,17 @@ void MIMPI_Init(bool enable_deadlock_detection) {
 }
 
 void kill_thread(int my_rank, int i, void* params, size_t count) {
-    //printf("kill_thread: %ld\n", count);
     char* buffer = malloc(sizeof(metadata) + count);
     metadata* md = (metadata*)buffer;
     writer_params* params_p = (writer_params*)params;
     md->size = params_p->count;
     md->count = count;
     md->tag = KILL_THREAD;
-    //printf("kill_thread: %d\n", md->size);
     
     memcpy(buffer + sizeof(metadata), params, count);
-    //ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
+    ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
     free(buffer);
-    //ASSERT_SYS_OK(sent);
+    ASSERT_SYS_OK(sent);
 }
 
 void MIMPI_Finalize() {
@@ -242,7 +240,6 @@ void MIMPI_Finalize() {
     free(end_list);
     free(waiting_for_count);
     free(waiting_for_tag);
-    //printf("End of finalize in rank: %d\n", my_rank);
     channels_finalize();
 }
 
@@ -292,7 +289,9 @@ MIMPI_Retcode MIMPI_Send(
             md->size = PIPE_BUFF_UPDT;
             md->count = count;
             md->tag = tag;
+            printf("Beforum\n");
             memcpy(buffer + sizeof(metadata), data + (i * PIPE_BUFF_UPDT), PIPE_BUFF_UPDT);
+            printf("Afterum\n");
             ssize_t sent = chsend(local_dest, buffer, PIPE_BUF);
             free(buffer);
             ASSERT_SYS_OK(sent);
@@ -422,7 +421,6 @@ MIMPI_Retcode MIMPI_Bcast(
     int left_subtree = 2 * my_rank + 1;
     int right_subtree = 2 * my_rank + 2;
     if (left_subtree < world_size) {
-        //printf("Process %d waiting for child %d\n", my_rank, left_subtree);
         if (root != my_rank) {
             MIMPI_Recv(data, count, world_size + 4, BROADCAST_MESSAGE);
         }
@@ -441,14 +439,13 @@ MIMPI_Retcode MIMPI_Bcast(
             MIMPI_Recv(recv_buffer, count, world_size + 5, BROADCAST_MESSAGE);
             free(recv_buffer);
         }
-        //printf("Process %d waiting for child %d\n", my_rank, right_subtree);
     }
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
             MIMPI_Send(data, count, 676 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE);
         }
         else {
-            MIMPI_Send(data, count, 676 + ((my_rank / 2) * 3) + 2, BROADCAST_MESSAGE);
+            MIMPI_Send(data, count, 676 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE);
         }
 
         if (root != my_rank) {
@@ -467,7 +464,6 @@ MIMPI_Retcode MIMPI_Bcast(
         MIMPI_Send(data, count, 676 + right_subtree * 3, BROADCAST_MESSAGE);
     }
 
-    printf("Process %d exited broadcast.\n", my_rank);
     return MIMPI_SUCCESS;
 }
 
