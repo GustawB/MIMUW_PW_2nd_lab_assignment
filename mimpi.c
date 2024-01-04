@@ -291,9 +291,7 @@ MIMPI_Retcode MIMPI_Send(
             md->size = PIPE_BUFF_UPDT;
             md->count = count;
             md->tag = tag;
-            printf("Beforum\n");
             memcpy(buffer + sizeof(metadata), data + (i * PIPE_BUFF_UPDT), PIPE_BUFF_UPDT);
-            printf("Afterum\n");
             ssize_t sent = chsend(local_dest, buffer, PIPE_BUF);
             free(buffer);
             ASSERT_SYS_OK(sent);
@@ -353,7 +351,7 @@ MIMPI_Retcode MIMPI_Recv(
     buffer_list* prev = head_list[source];
     buffer_list* iter = head_list[source]->next;
     while (iter != NULL && iter->count != count) {
-        if (tag == MIMPI_ANY_TAG || iter->tag == tag) {
+        if ((tag == MIMPI_ANY_TAG || iter->tag == tag) && iter->count == count) {
             break;
         }
         iter = iter->next;
