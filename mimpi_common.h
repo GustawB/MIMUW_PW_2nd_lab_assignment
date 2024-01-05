@@ -57,13 +57,4 @@ _Noreturn extern void fatal(const char* fmt, ...);
                 #expr, __func__, __FILE__, __LINE__                                        \
             );                                                                             \
     } while(0) 
-
-void common_init(int size);
-
-void common_finalize();
-
-void* synchronizeProcesses();
-
-void unlock_barrier();
-
 #endif // MIMPI_COMMON_H
