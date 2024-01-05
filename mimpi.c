@@ -115,7 +115,7 @@ void* read_data(void* data) {
             end_list[params.source]->tag = md2.tag;
             end_list[params.source]->count = md2.count;
             end_list[params.source]->size = md2.size;
-            
+
             ASSERT_NOT_NULL(memcpy(end_list[params.source]->buffer, buffer2, md2.size));
             free(buffer2);
             //printf("%d out of %d; size: %d\n", i, nr_of_chunks, end_list[params.source]->size);
@@ -153,12 +153,10 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     waiting_for_tag = malloc(nr_of_threads_to_create * sizeof(int));
     head_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
     end_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
-    pipes_state = malloc(world_size * sizeof(int));
+    pipes_state = malloc(nr_of_threads_to_create * sizeof(int));
 
     for (int i = 0; i < nr_of_threads_to_create; ++i) {
-        if (i < world_size) {
-            pipes_state[i] = 0;
-        }
+        pipes_state[i] = 0;
         waiting_for_count[i] = -1;
         waiting_for_tag[i] = -1;
         head_list[i] = malloc(sizeof(buffer_list));
@@ -186,7 +184,7 @@ void kill_thread(int my_rank, int i, void* params, size_t count) {
     md->size = params_p->count;
     md->count = count;
     md->tag = KILL_THREAD;
-    
+
     memcpy(buffer + sizeof(metadata), params, count);
     ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
     free(buffer);
@@ -205,15 +203,20 @@ void MIMPI_Finalize() {
     params.count = 1;
     params.tag = -1;
     // Send info to all other processes that we are leaving.
-    char finalize_data = FINALIZE_MESSAGE;
-    for (int i = 0; i < world_size; ++i) {
-        MIMPI_Send(&finalize_data, sizeof(finalize_data), i, FINALIZE_MESSAGE);
-    }
+    //char finalize_data = FINALIZE_MESSAGE;
+    //for (int i = 0; i < world_size; ++i) {
+      //  MIMPI_Send(&finalize_data, sizeof(finalize_data), i, FINALIZE_MESSAGE);
+    //}
     // Kill all helper threads.
     for (int i = 0; i < world_size; ++i) {
         kill_thread(my_rank, i, &params, sizeof(writer_params));
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
     }
+
+
+    // DO SOMETHING ABOUT PROCESSES STILL HANGING ON MUTEXES!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
     // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
         for (int j = 0; j < world_size; ++j) {
@@ -281,32 +284,58 @@ int MIMPI_World_rank() {
 
 bool was_pipe_closed(int source) {
     if (head_list[source] == end_list[source]) {
+        printf("no error data for %d\n", source);
         return false;
     }
     buffer_list* iter = head_list[source]->next;
     while (iter != NULL) {
+        printf("loop for source %d, iter-> tag is %d\n", source, iter->tag);
+        /*
+        printf("loop");
         if (iter->tag == FINALIZE_MESSAGE) {
             pipes_state[source] = FINALIZE_MESSAGE;
+            printf("true\n");
             return true;
-        }
+        }*/
         iter = iter->next;
     }
+    printf("out of loop for source %d\n", source);
     return false;
 }
 
 MIMPI_Retcode MIMPI_Send(
-    void const *data,
+    void const* data,
     int count,
     int destination,
     int tag
 ) {
-    if (was_pipe_closed(destination)) {
+    // Lock to check if we still have somewhere to send
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[destination]));
+    //Calculate destinations
+    int dest;
+    if (tag == BARRIER_MESSAGE) {
+        dest = (destination - 580) / 3;
+    }
+    else if (tag == BARRIER_MESSAGE - 1) {
+        //580 + ((my_rank / 2) * 3) + 1
+        tag = BARRIER_MESSAGE;
+        dest = (destination - 1 - 580)/3;
+    }
+    else if (tag == BARRIER_MESSAGE - 2) {
+        tag = BARRIER_MESSAGE;
+        //580 + ((my_rank / 2 - 1) * 3) + 2
+        dest = (destination - 2 - 580)/3;
+    }
+    else {
+        dest = destination;
+    }
+    if (pipes_state[dest] == FINALIZE_MESSAGE || was_pipe_closed(dest)) {
+        ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[destination]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
-    else if (pipes_state[destination] == FINALIZE_MESSAGE) {
-        return MIMPI_ERROR_REMOTE_FINISHED;
-    }
+    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[destination]));
     //TODO
+    //if()
     int my_rank = MIMPI_World_rank();
     if (my_rank == destination) {
         return MIMPI_ERROR_ATTEMPTED_SELF_OP;
@@ -350,14 +379,14 @@ MIMPI_Retcode MIMPI_Send(
         md->size = alloc_size;
         md->count = count;
         md->tag = tag;
-        memcpy(buffer + sizeof(metadata), data + ((count/PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size);
+        memcpy(buffer + sizeof(metadata), data + ((count / PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size);
         ssize_t sent = chsend(local_dest, buffer, alloc_size + sizeof(metadata));
         free(buffer);
         ASSERT_SYS_OK(sent);
         if (sent != alloc_size + sizeof(metadata))
             fatal("Wrote less than expected.");
     }
-    
+
     return MIMPI_SUCCESS;
 }
 
@@ -376,7 +405,7 @@ bool is_there_data_to_read(int source, int count, int tag) {
 }
 
 MIMPI_Retcode MIMPI_Recv(
-    void *data,
+    void* data,
     int count,
     int source,
     int tag
@@ -387,15 +416,12 @@ MIMPI_Retcode MIMPI_Recv(
     else if (source >= MIMPI_World_size() && tag > 0) {
         return MIMPI_ERROR_NO_SUCH_RANK;
     }
-    else if (pipes_state[source] == FINALIZE_MESSAGE) {
-        return MIMPI_ERROR_REMOTE_FINISHED;
-    }
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
         //printf("Waiting for data from source: %d.\n", source);
         while (!is_there_data_to_read(source, count, tag)) {
-            if (was_pipe_closed(source)) {
+            if (pipes_state[source] == FINALIZE_MESSAGE || was_pipe_closed(source)) {
                 ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
                 return MIMPI_ERROR_REMOTE_FINISHED;
             }
@@ -444,32 +470,40 @@ MIMPI_Retcode MIMPI_Barrier() {
     char* recv_buffer = malloc(sizeof(int));
     int count = sizeof(int);
     if (left_subtree < world_size) {
-        MIMPI_Recv(recv_buffer, count, world_size + 1, BARRIER_MESSAGE);
+        int result = MIMPI_Recv(recv_buffer, count, world_size + 1, BARRIER_MESSAGE);
+        ASSERT_ZERO(result);
     }
     if (right_subtree < world_size) {
-        MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
+        int result = MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
+        ASSERT_ZERO(result);
+
     }
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
-            MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, BARRIER_MESSAGE);
+            int result = MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, BARRIER_MESSAGE - 1);
+            ASSERT_ZERO(result);
         }
         else {
-            MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BARRIER_MESSAGE);
+            int result = MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BARRIER_MESSAGE - 2);
+            ASSERT_ZERO(result);
         }
-        MIMPI_Recv(recv_buffer, count, world_size, BARRIER_MESSAGE);
+        int result = MIMPI_Recv(recv_buffer, count, world_size, BARRIER_MESSAGE);
+        ASSERT_ZERO(result);
     }
     if (left_subtree < world_size) {
-        MIMPI_Send(&send_buffer, count, 580 + left_subtree * 3, BARRIER_MESSAGE);
+        int result = MIMPI_Send(&send_buffer, count, 580 + left_subtree * 3, BARRIER_MESSAGE);
+        ASSERT_ZERO(result);
     }
     if (right_subtree < world_size) {
-        MIMPI_Send(&send_buffer, count, 580 + right_subtree * 3, BARRIER_MESSAGE);
+        int result = MIMPI_Send(&send_buffer, count, 580 + right_subtree * 3, BARRIER_MESSAGE);
+        ASSERT_ZERO(result);
     }
     free(recv_buffer);
     return MIMPI_SUCCESS;
 }
 
 MIMPI_Retcode MIMPI_Bcast(
-    void *data,
+    void* data,
     int count,
     int root
 ) {
@@ -526,8 +560,8 @@ MIMPI_Retcode MIMPI_Bcast(
 }
 
 MIMPI_Retcode MIMPI_Reduce(
-    void const *send_data,
-    void *recv_data,
+    void const* send_data,
+    void* recv_data,
     int count,
     MIMPI_Op op,
     int root
