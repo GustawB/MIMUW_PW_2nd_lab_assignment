@@ -19,17 +19,9 @@ int main(int argc, char** argv) {
     }
     int nr_of_copies = atoi(argv[1]);
     char* fp_prog = argv[2];
-    // Parse program's file path.
-    if (strlen(fp_prog) == 0 || (strlen(fp_prog) < 3 
-        && fp_prog[0] == '.' && fp_prog[1] == '/'))
-    {
-        free(fp_prog);
-        fatal("Passed empty file path to the %s\n", argv[0]);
-    }
     // Make array of args for processes that will be executed later.
-    char** program_args = NULL;
     if (argc > 3) {
-        program_args = &argv[3];
+        //printf("%s\n", argv[3]);
     }
 
     // Create nr_of_copies^2 pipes.
@@ -92,13 +84,8 @@ int main(int argc, char** argv) {
             // Add enviromental variable describing the size
             // of the current world.
             ASSERT_ZERO(setenv(MIMPI_envvar_name_world_size, world_size_buffer, 0));
-
-            if (program_args == NULL) {
-                ASSERT_SYS_OK(execlp(fp_prog, fp_prog, NULL));
-            }
-            else {
-                ASSERT_SYS_OK(execlp(fp_prog, fp_prog, program_args, NULL));
-            }
+            char* const* arg = &argv[2];
+            ASSERT_SYS_OK(execvp(fp_prog, arg));
         }
     }
 

@@ -327,6 +327,13 @@ MIMPI_Retcode MIMPI_Send(
 ) {
     // Lock to check if we still have somewhere to send
     //Calculate destinations
+    int my_rank = MIMPI_World_rank();
+    if (my_rank == destination) {
+        return MIMPI_ERROR_ATTEMPTED_SELF_OP;
+    }
+    else if (destination >= MIMPI_World_size() && tag > 0) {
+        return MIMPI_ERROR_NO_SUCH_RANK;
+    }
     int dest;
     if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE || tag == FINALIZE_MESSAGE) {
         dest = (destination - 580) / 3;
@@ -355,14 +362,6 @@ MIMPI_Retcode MIMPI_Send(
     }
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
     //TODO
-
-    int my_rank = MIMPI_World_rank();
-    if (my_rank == destination) {
-        return MIMPI_ERROR_ATTEMPTED_SELF_OP;
-    }
-    else if (destination >= MIMPI_World_size() && tag > 0) {
-        return MIMPI_ERROR_NO_SUCH_RANK;
-    }
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
     if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE || tag == FINALIZE_MESSAGE) {
