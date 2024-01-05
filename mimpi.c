@@ -212,13 +212,33 @@ void MIMPI_Finalize() {
     for (int i = 0; i < world_size; ++i) {
         MIMPI_Send(&finalize_data, sizeof(finalize_data), i, SMALL_FINALIZE);
     }
-    for (int i = 0; i < world_size; ++i) {
+    /*for (int i = 0; i < world_size; ++i) {
         for (int j = 0; j < 3; ++j) {
             MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + j + i * 3, FINALIZE_MESSAGE);
             //MIMPI_Send(&finalize_data, sizeof(finalize_data), 676 + j + i * 3, FINALIZE_MESSAGE);
             //MIMPI_Send(&finalize_data, sizeof(finalize_data), 772 + j + i * 3, FINALIZE_MESSAGE);
         }
+    }*/
+    int left_subtree = 2 * my_rank + 1;
+    int right_subtree = 2 * my_rank + 2;
+    if (my_rank > 0) {
+        if (my_rank % 2 != 0) {
+            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
+        }
+        else {
+            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
+        }
     }
+    if (left_subtree < world_size) {
+        MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + left_subtree * 3, FINALIZE_MESSAGE);
+    }
+    if (right_subtree < world_size) {
+        MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + right_subtree * 3, FINALIZE_MESSAGE);
+    }
+
+
+
+
 
     // Kill all helper threads.
     for (int i = 0; i < world_size; ++i) {
@@ -253,13 +273,13 @@ void MIMPI_Finalize() {
             // Close write descriptor.
             ASSERT_SYS_OK(close(580 + j + i * 3));
             // Close read descriptor.
-            ASSERT_SYS_OK(close(628 + j + i * 3));
+           /* ASSERT_SYS_OK(close(628 + j + i * 3));
             // Close write descriptor.
             ASSERT_SYS_OK(close(676 + j + i * 3));
             // Close read descriptor.
             ASSERT_SYS_OK(close(724 + j + i * 3));
             // Close write descriptor.
-            ASSERT_SYS_OK(close(772 + j + i * 3));
+            ASSERT_SYS_OK(close(772 + j + i * 3));*/
         }
     }
 
@@ -273,7 +293,7 @@ void MIMPI_Finalize() {
             cleaner = head_list[i];
         }
         ASSERT_ZERO(pthread_mutex_destroy(&read_mutex[i]));
-        ASSERT_ZERO(pthread_cond_destroy(read_cond));
+        ASSERT_ZERO(pthread_cond_destroy(&read_cond[i]));
     }
     free(read_mutex);
     free(read_cond);
@@ -410,6 +430,9 @@ MIMPI_Retcode MIMPI_Send(
         
         ssize_t sent = chsend(local_dest, buffer, alloc_size + sizeof(metadata));
         free(buffer);
+        if (sent == -1) {
+            printf("Local dest: %d; destination: %d; tag: %d\n", local_dest, destination, tag);
+        }
         ASSERT_SYS_OK(sent);
         if (sent != alloc_size + sizeof(metadata))
             fatal("Wrote less than expected.");
@@ -493,11 +516,11 @@ MIMPI_Retcode MIMPI_Barrier() {
     int world_size = MIMPI_World_size();
     int my_rank = MIMPI_World_rank();
     int left_subtree = 2 * my_rank + 1;
+    int right_subtree = 2 * my_rank + 2;
     int lse = -1;
     int rse = -1;
     int parent_send = -1;
     int parent_recv = -1;
-    int right_subtree = 2 * my_rank + 2;
     char send_buffer = my_rank;
     char* recv_buffer = malloc(sizeof(int));
     int count = sizeof(int);
@@ -510,7 +533,7 @@ MIMPI_Retcode MIMPI_Barrier() {
     //printf("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
-            if (lse > 0 && rse > 0) {
+            if (lse > 0 || rse > 0) {
                 MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
             }
             else {
@@ -518,16 +541,16 @@ MIMPI_Retcode MIMPI_Barrier() {
             }
         }
         else {
-            if (lse > 0 && rse > 0) {
+            if (lse > 0 || rse > 0) {
                 MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
             }
             else {
                 parent_send = MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BARRIER_MESSAGE - 2);
             }
         }
-        //printf("Process: %d; parent_send: %d\n", my_rank, parent_send);
         parent_recv = MIMPI_Recv(recv_buffer, count, world_size, BARRIER_MESSAGE);
     }
+    //printf("Process: %d; parent_send: %d; parent_recv: %d\n", my_rank, parent_send, parent_recv);
     if (left_subtree < world_size) {
         if (lse == 0) {
             if (parent_send > 0 || parent_recv > 0 || rse > 0) {
@@ -550,6 +573,9 @@ MIMPI_Retcode MIMPI_Barrier() {
     }
     free(recv_buffer);
     if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
+        int parent_id = (my_rank / 2);
+        if (my_rank % 2 == 0) { --parent_id; }
+        //printf("lse: %d; rse: %d; parent_send: %d; parent_recv: %d; mi id: %d; parent id: %d\n", lse, rse, parent_send, parent_recv, my_rank, parent_id);
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
     return MIMPI_SUCCESS;
