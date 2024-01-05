@@ -180,7 +180,7 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     ASSERT_ZERO(pthread_cond_init(read_cond, NULL));
 }
 
-void kill_thread(int my_rank, int i, void* params, size_t count) {
+void kill_thread(void* params, size_t count, int destination) {
     char* buffer = malloc(sizeof(metadata) + count);
     metadata* md = (metadata*)buffer;
     writer_params* params_p = (writer_params*)params;
@@ -189,7 +189,8 @@ void kill_thread(int my_rank, int i, void* params, size_t count) {
     md->tag = KILL_THREAD;
 
     memcpy(buffer + sizeof(metadata), params, count);
-    ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
+    //ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
+    ssize_t sent = chsend(destination, buffer, count + sizeof(metadata));
     free(buffer);
     ASSERT_SYS_OK(sent);
 }
@@ -214,13 +215,21 @@ void MIMPI_Finalize() {
     for (int i = 0; i < world_size; ++i) {
         for (int j = 0; j < 3; ++j) {
             MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + j + i * 3, FINALIZE_MESSAGE);
+            //MIMPI_Send(&finalize_data, sizeof(finalize_data), 676 + j + i * 3, FINALIZE_MESSAGE);
+            //MIMPI_Send(&finalize_data, sizeof(finalize_data), 772 + j + i * 3, FINALIZE_MESSAGE);
         }
     }
 
     // Kill all helper threads.
-    for (int i = 0; i < world_size + 9; ++i) {
-        kill_thread(my_rank, i, &params, sizeof(writer_params));
+    for (int i = 0; i < world_size; ++i) {
+        kill_thread(&params, sizeof(writer_params), 276 + my_rank * 16 + i);
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
+    }
+    int iter = world_size;
+    for (int i = 0; i < 3; ++i) {
+        kill_thread(&params, sizeof(writer_params), 580 + my_rank * 3 + i);
+        ASSERT_ZERO(pthread_join(pipe_threads[iter], NULL));
+        ++iter;
     }
 
 
@@ -498,7 +507,7 @@ MIMPI_Retcode MIMPI_Barrier() {
     if (right_subtree < world_size) {
         rse= MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
     }
-    //("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
+    //printf("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
             if (lse > 0 && rse > 0) {
@@ -521,7 +530,7 @@ MIMPI_Retcode MIMPI_Barrier() {
     }
     if (left_subtree < world_size) {
         if (lse == 0) {
-            if (parent_send > 0 || parent_recv > 0) {
+            if (parent_send > 0 || parent_recv > 0 || rse > 0) {
                 MIMPI_Send(&send_buffer, count, 580 + left_subtree * 3, FINALIZE_MESSAGE);
             }
             else {
@@ -531,7 +540,7 @@ MIMPI_Retcode MIMPI_Barrier() {
     }
     if (right_subtree < world_size) {
         if (rse == 0) {
-            if (parent_send > 0 || parent_recv > 0) {
+            if (parent_send > 0 || parent_recv > 0 || lse > 0) {
                 MIMPI_Send(&send_buffer, count, 580 + right_subtree * 3, FINALIZE_MESSAGE);
             }
             else {
