@@ -51,6 +51,7 @@ typedef struct metadata metadata;
 #define BARRIER_MESSAGE -2
 #define BROADCAST_MESSAGE -3
 #define REDUCE_MESSAGE -4
+#define FINALIZE_MESSAGE -5
 
 pthread_t* pipe_threads;
 pthread_mutex_t* read_mutex;
@@ -58,6 +59,7 @@ pthread_mutex_t* no_data_mutex;
 pthread_cond_t* read_cond;
 int* waiting_for_count;
 int* waiting_for_tag;
+int* pipes_state;
 buffer_list** head_list;
 buffer_list** end_list;
 
@@ -126,6 +128,12 @@ void* read_data(void* data) {
             waiting_for_tag[params.source] = -1;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
         }
+        else if (waiting_for_count[params.source] != -1 &&
+            md.tag == FINALIZE_MESSAGE) {
+            waiting_for_count[params.source] = -1;
+            waiting_for_tag[params.source] = -1;
+            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
+        }
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
 
@@ -145,8 +153,12 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     waiting_for_tag = malloc(nr_of_threads_to_create * sizeof(int));
     head_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
     end_list = malloc(nr_of_threads_to_create * sizeof(buffer_list));
+    pipes_state = malloc(world_size * sizeof(int));
 
     for (int i = 0; i < nr_of_threads_to_create; ++i) {
+        if (i < world_size) {
+            pipes_state[i] = 0;
+        }
         waiting_for_count[i] = -1;
         waiting_for_tag[i] = -1;
         head_list[i] = malloc(sizeof(buffer_list));
@@ -192,6 +204,12 @@ void MIMPI_Finalize() {
     params.data = &data;
     params.count = 1;
     params.tag = -1;
+    // Send info to all other processes that we are leaving.
+    char finalize_data = FINALIZE_MESSAGE;
+    for (int i = 0; i < world_size; ++i) {
+        MIMPI_Send(&finalize_data, sizeof(finalize_data), i, FINALIZE_MESSAGE);
+    }
+    // Kill all helper threads.
     for (int i = 0; i < world_size; ++i) {
         kill_thread(my_rank, i, &params, sizeof(writer_params));
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
@@ -261,14 +279,41 @@ int MIMPI_World_rank() {
     return atoi(process_id);
 }
 
+bool was_pipe_closed(int source) {
+    if (head_list[source] == end_list[source]) {
+        return false;
+    }
+    buffer_list* iter = head_list[source]->next;
+    while (iter != NULL) {
+        if (iter->tag == FINALIZE_MESSAGE) {
+            pipes_state[source] = FINALIZE_MESSAGE;
+            return true;
+        }
+        iter = iter->next;
+    }
+    return false;
+}
+
 MIMPI_Retcode MIMPI_Send(
     void const *data,
     int count,
     int destination,
     int tag
 ) {
+    if (was_pipe_closed(destination)) {
+        return MIMPI_ERROR_REMOTE_FINISHED;
+    }
+    else if (pipes_state[destination] == FINALIZE_MESSAGE) {
+        return MIMPI_ERROR_REMOTE_FINISHED;
+    }
     //TODO
     int my_rank = MIMPI_World_rank();
+    if (my_rank == destination) {
+        return MIMPI_ERROR_ATTEMPTED_SELF_OP;
+    }
+    else if (destination >= MIMPI_World_size() && tag > 0) {
+        return MIMPI_ERROR_NO_SUCH_RANK;
+    }
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
     if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE) {
@@ -336,11 +381,24 @@ MIMPI_Retcode MIMPI_Recv(
     int source,
     int tag
 ) {
+    if (MIMPI_World_rank() == source) {
+        return MIMPI_ERROR_ATTEMPTED_SELF_OP;
+    }
+    else if (source >= MIMPI_World_size() && tag > 0) {
+        return MIMPI_ERROR_NO_SUCH_RANK;
+    }
+    else if (pipes_state[source] == FINALIZE_MESSAGE) {
+        return MIMPI_ERROR_REMOTE_FINISHED;
+    }
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
         //printf("Waiting for data from source: %d.\n", source);
         while (!is_there_data_to_read(source, count, tag)) {
+            if (was_pipe_closed(source)) {
+                ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
+                return MIMPI_ERROR_REMOTE_FINISHED;
+            }
             waiting_for_count[source] = count;
             waiting_for_tag[source] = tag;
             ASSERT_ZERO(pthread_cond_wait(&read_cond[source], &read_mutex[source]));
