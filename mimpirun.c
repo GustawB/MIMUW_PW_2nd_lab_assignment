@@ -66,22 +66,6 @@ int main(int argc, char** argv) {
             ASSERT_SYS_OK(dup2(channel_dscba[1], 580 + j + i * 3));
             // Close the old write descriptor.
             ASSERT_SYS_OK(close(channel_dscba[1]));
-            // Move read descriptor to the index = 532+id+j.
-            ASSERT_SYS_OK(dup2(channel_dscbr[0], 628 + j + i * 3));
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(channel_dscbr[0]));
-            // Move write descriptor to the index = 580+id+j.
-            ASSERT_SYS_OK(dup2(channel_dscbr[1], 676 + j + i * 3));
-            // Close the old write descriptor.
-            ASSERT_SYS_OK(close(channel_dscbr[1]));
-            // Move read descriptor to the index = 532+id+j.
-            ASSERT_SYS_OK(dup2(channel_dscrd[0], 724 + j + i * 3));
-            // Close the old read descriptor.
-            ASSERT_SYS_OK(close(channel_dscrd[0]));
-            // Move write descriptor to the index = 580+id+j.
-            ASSERT_SYS_OK(dup2(channel_dscrd[1], 772 + j + i * 3));
-            // Close the old write descriptor.
-            ASSERT_SYS_OK(close(channel_dscrd[1]));
         }
     }
 
@@ -138,14 +122,6 @@ int main(int argc, char** argv) {
             ASSERT_SYS_OK(close(532 + j + i * 3));
             // Close write descriptor.
             ASSERT_SYS_OK(close(580 + j + i * 3));
-            // Close read descriptor.
-            ASSERT_SYS_OK(close(628 + j + i * 3));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(676 + j + i * 3));
-            // Close read descriptor.
-            ASSERT_SYS_OK(close(724 + j + i * 3));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(772 + j + i * 3));
         }
     }
 

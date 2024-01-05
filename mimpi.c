@@ -74,11 +74,8 @@ void* read_data(void* data) {
     else if (params.source >= params.world_size && params.source < params.world_size + 3) { // barrier
         local_source = 532 + params.my_rank * 3 + params.source - params.world_size;
     }
-    else if (params.source >= params.world_size + 3 && params.source < params.world_size + 6) { // broadcast
-        local_source = 628 + params.my_rank * 3 + params.source - params.world_size - 3;
-    }
-    else { // reduce
-        local_source = 724 + params.my_rank * 3 + params.source - params.world_size - 6;
+    else {
+        fatal("Forgot to delete descriptors for broadcast and reduce\n");
     }
     void* temp = malloc(sizeof(metadata));
     while (1) {
@@ -147,7 +144,7 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
     //TODO
     int world_size = MIMPI_World_size();
-    int nr_of_threads_to_create = world_size + 9;
+    int nr_of_threads_to_create = world_size + 3;
 
     pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
     read_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
@@ -175,9 +172,8 @@ void MIMPI_Init(bool enable_deadlock_detection) {
         params->world_size = world_size;
         ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
         ASSERT_ZERO(pthread_mutex_init(&read_mutex[i], NULL));
+        ASSERT_ZERO(pthread_cond_init(&read_cond[i], NULL));
     }
-
-    ASSERT_ZERO(pthread_cond_init(read_cond, NULL));
 }
 
 void kill_thread(void* params, size_t count, int destination) {
@@ -189,7 +185,6 @@ void kill_thread(void* params, size_t count, int destination) {
     md->tag = KILL_THREAD;
 
     memcpy(buffer + sizeof(metadata), params, count);
-    //ssize_t sent = chsend(276 + my_rank * 16 + i, buffer, count + sizeof(metadata));
     ssize_t sent = chsend(destination, buffer, count + sizeof(metadata));
     free(buffer);
     ASSERT_SYS_OK(sent);
@@ -212,13 +207,6 @@ void MIMPI_Finalize() {
     for (int i = 0; i < world_size; ++i) {
         MIMPI_Send(&finalize_data, sizeof(finalize_data), i, SMALL_FINALIZE);
     }
-    /*for (int i = 0; i < world_size; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + j + i * 3, FINALIZE_MESSAGE);
-            //MIMPI_Send(&finalize_data, sizeof(finalize_data), 676 + j + i * 3, FINALIZE_MESSAGE);
-            //MIMPI_Send(&finalize_data, sizeof(finalize_data), 772 + j + i * 3, FINALIZE_MESSAGE);
-        }
-    }*/
     int left_subtree = 2 * my_rank + 1;
     int right_subtree = 2 * my_rank + 2;
     if (my_rank > 0) {
@@ -236,10 +224,6 @@ void MIMPI_Finalize() {
         MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + right_subtree * 3, FINALIZE_MESSAGE);
     }
 
-
-
-
-
     // Kill all helper threads.
     for (int i = 0; i < world_size; ++i) {
         kill_thread(&params, sizeof(writer_params), 276 + my_rank * 16 + i);
@@ -251,10 +235,6 @@ void MIMPI_Finalize() {
         ASSERT_ZERO(pthread_join(pipe_threads[iter], NULL));
         ++iter;
     }
-
-
-    // DO SOMETHING ABOUT PROCESSES STILL HANGING ON MUTEXES!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 
     // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
@@ -272,18 +252,10 @@ void MIMPI_Finalize() {
             ASSERT_SYS_OK(close(532 + j + i * 3));
             // Close write descriptor.
             ASSERT_SYS_OK(close(580 + j + i * 3));
-            // Close read descriptor.
-           /* ASSERT_SYS_OK(close(628 + j + i * 3));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(676 + j + i * 3));
-            // Close read descriptor.
-            ASSERT_SYS_OK(close(724 + j + i * 3));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(772 + j + i * 3));*/
         }
     }
 
-    for (int i = 0; i < world_size + 9; ++i) {
+    for (int i = 0; i < world_size + 3; ++i) {
         buffer_list* cleaner = head_list[i];
         while (head_list[i] != NULL)
         {
