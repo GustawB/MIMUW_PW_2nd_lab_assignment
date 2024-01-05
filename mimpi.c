@@ -553,6 +553,18 @@ MIMPI_Retcode MIMPI_Barrier() {
     return MIMPI_SUCCESS;
 }
 
+bool find_root(int node, int root) {
+    if (node >= MIMPI_World_size()) {
+        return false;
+    }
+    else if (node == root) {
+        return true;
+    }
+    bool left = find_root(2 * node + 1, root);
+    bool right = find_root(2 * node + 2, root);
+    return (left || right);
+}
+
 MIMPI_Retcode MIMPI_Bcast(
     void* data,
     int count,
@@ -563,6 +575,11 @@ MIMPI_Retcode MIMPI_Bcast(
     int my_rank = MIMPI_World_rank();
     int left_subtree = 2 * my_rank + 1;
     int right_subtree = 2 * my_rank + 2;
+    int side = 0;
+    if (my_rank != root) {
+        if (find_root(left_subtree, root)) { side = -1; }
+        else if (find_root(right_subtree, root)) { side = 1; }
+    }
     int lse = -1;
     int rse = -1;
     int parent_send = -1;
@@ -571,7 +588,14 @@ MIMPI_Retcode MIMPI_Bcast(
     memcpy(temp_buffer, data, count);
     if (left_subtree < world_size) {
         if (root != my_rank) {
-            lse = MIMPI_Recv(data, count, world_size + 1, BROADCAST_MESSAGE);
+            if (side == -1) {
+                lse = MIMPI_Recv(data, count, world_size + 1, BROADCAST_MESSAGE);
+            }
+            else {
+                char* recv_buffer = malloc(count);
+                lse = MIMPI_Recv(recv_buffer, count, world_size + 1, BROADCAST_MESSAGE);
+                free(recv_buffer);
+            }
         }
         else {
             char* recv_buffer = malloc(count);
@@ -581,7 +605,14 @@ MIMPI_Retcode MIMPI_Bcast(
     }
     if (right_subtree < world_size) {
         if (root != my_rank) {
-            rse = MIMPI_Recv(data, count, world_size + 2, BROADCAST_MESSAGE);
+            if (side == 1) {
+                rse = MIMPI_Recv(data, count, world_size + 2, BROADCAST_MESSAGE);
+            }
+            else {
+                char* recv_buffer = malloc(count);
+                rse = MIMPI_Recv(recv_buffer, count, world_size + 2, BROADCAST_MESSAGE);
+                free(recv_buffer);
+            }
         }
         else {
             char* recv_buffer = malloc(count);
