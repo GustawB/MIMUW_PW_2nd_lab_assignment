@@ -47,11 +47,12 @@ struct metadata {
 typedef struct metadata metadata;
 
 #define PIPE_BUFF_UPDT (PIPE_BUF - sizeof(metadata))
-#define KILL_THREAD -1
-#define BARRIER_MESSAGE -2
-#define BROADCAST_MESSAGE -3
-#define REDUCE_MESSAGE -4
-#define FINALIZE_MESSAGE -5
+#define KILL_THREAD -2
+#define BARRIER_MESSAGE -3
+#define BROADCAST_MESSAGE -6
+#define REDUCE_MESSAGE -9
+#define SMALL_FINALIZE -12
+#define FINALIZE_MESSAGE -13
 
 pthread_t* pipe_threads;
 pthread_mutex_t* read_mutex;
@@ -65,6 +66,7 @@ buffer_list** end_list;
 
 void* read_data(void* data) {
     reader_params params = *((reader_params*)data);
+    //printf("Created thread %d for process %d\n", params.source, params.my_rank);
     int local_source;
     if (params.source < params.world_size) {// normal read
         local_source = 20 + params.my_rank * 16 + params.source;
@@ -89,6 +91,7 @@ void* read_data(void* data) {
             free(temp);
             break;
         }
+        //printf("Process %d received data in thread with tag %d from source %d\n", params.my_rank, md.tag,params.source);
         ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
         end_list[params.source]->next = malloc(sizeof(buffer_list));
         end_list[params.source] = end_list[params.source]->next;
@@ -120,7 +123,7 @@ void* read_data(void* data) {
             free(buffer2);
             //printf("%d out of %d; size: %d\n", i, nr_of_chunks, end_list[params.source]->size);
         }
-
+        //("Process %d waiting for tag %d and count %d\n", params.my_rank, waiting_for_tag[params.source], waiting_for_count[params.source]);
         if (waiting_for_count[params.source] == md.count &&
             ((waiting_for_tag[params.source] == MIMPI_ANY_TAG && md.tag > 0) ||
                 (waiting_for_tag[params.source] == md.tag))) {
@@ -202,13 +205,20 @@ void MIMPI_Finalize() {
     params.data = &data;
     params.count = 1;
     params.tag = -1;
+
     // Send info to all other processes that we are leaving.
     char finalize_data = FINALIZE_MESSAGE;
     for (int i = 0; i < world_size; ++i) {
-        MIMPI_Send(&finalize_data, sizeof(finalize_data), i, FINALIZE_MESSAGE);
+        MIMPI_Send(&finalize_data, sizeof(finalize_data), i, SMALL_FINALIZE);
     }
-    // Kill all helper threads.
     for (int i = 0; i < world_size; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + j + i * 3, FINALIZE_MESSAGE);
+        }
+    }
+
+    // Kill all helper threads.
+    for (int i = 0; i < world_size + 9; ++i) {
         kill_thread(my_rank, i, &params, sizeof(writer_params));
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
     }
@@ -244,7 +254,7 @@ void MIMPI_Finalize() {
         }
     }
 
-    for (int i = 0; i < world_size; ++i) {
+    for (int i = 0; i < world_size + 9; ++i) {
         buffer_list* cleaner = head_list[i];
         while (head_list[i] != NULL)
         {
@@ -318,17 +328,17 @@ MIMPI_Retcode MIMPI_Send(
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[destination]));
     //Calculate destinations
     int dest;
-    if (tag == BARRIER_MESSAGE) {
+    if (tag == BARRIER_MESSAGE || tag == FINALIZE_MESSAGE) {
         dest = (destination - 580) / 3;
     }
-    else if (tag == BARRIER_MESSAGE - 1) {
-        //580 + ((my_rank / 2) * 3) + 1
-        tag = BARRIER_MESSAGE;
+    else if (tag == BARRIER_MESSAGE - 1 || tag == FINALIZE_MESSAGE - 1) {
+        if (tag == BARRIER_MESSAGE - 1) { tag = BARRIER_MESSAGE; }
+        else if (tag == FINALIZE_MESSAGE - 1) { tag = FINALIZE_MESSAGE; }
         dest = (destination - 1 - 580)/3;
     }
-    else if (tag == BARRIER_MESSAGE - 2) {
-        tag = BARRIER_MESSAGE;
-        //580 + ((my_rank / 2 - 1) * 3) + 2
+    else if (tag == BARRIER_MESSAGE - 2 || tag == FINALIZE_MESSAGE - 2) {
+        if (tag == BARRIER_MESSAGE - 2) { tag = BARRIER_MESSAGE; }
+        else if (tag == FINALIZE_MESSAGE - 2) { tag = FINALIZE_MESSAGE; }
         dest = (destination - 2 - 580)/3;
     }
     else {
@@ -340,7 +350,7 @@ MIMPI_Retcode MIMPI_Send(
     }
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[destination]));
     //TODO
-    //if()
+
     int my_rank = MIMPI_World_rank();
     if (my_rank == destination) {
         return MIMPI_ERROR_ATTEMPTED_SELF_OP;
@@ -350,7 +360,7 @@ MIMPI_Retcode MIMPI_Send(
     }
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
-    if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE) {
+    if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE || tag == FINALIZE_MESSAGE) {
         local_dest = destination;
     }
     else {
@@ -358,6 +368,9 @@ MIMPI_Retcode MIMPI_Send(
     }
     if (PIPE_BUFF_UPDT == count) {
         alloc_size = count;
+    }
+    if (tag == SMALL_FINALIZE) {
+        tag = FINALIZE_MESSAGE;
     }
     if (count > PIPE_BUFF_UPDT) {
         int chunks = count / PIPE_BUFF_UPDT;
@@ -385,6 +398,7 @@ MIMPI_Retcode MIMPI_Send(
         md->count = count;
         md->tag = tag;
         memcpy(buffer + sizeof(metadata), data + ((count / PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size);
+        
         ssize_t sent = chsend(local_dest, buffer, alloc_size + sizeof(metadata));
         free(buffer);
         ASSERT_SYS_OK(sent);
@@ -424,8 +438,8 @@ MIMPI_Retcode MIMPI_Recv(
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
-        //printf("Waiting for data from source: %d.\n", source);
         while (!is_there_data_to_read(source, count, tag)) {
+            //printf("Process %d waiting for data from source: %d.\n", MIMPI_World_rank(), source);
             if (pipes_state[source] == FINALIZE_MESSAGE || was_pipe_closed(source)) {
                 ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
                 return MIMPI_ERROR_REMOTE_FINISHED;
@@ -457,9 +471,6 @@ MIMPI_Retcode MIMPI_Recv(
         free(iter);
         iter = prev->next;
     }
-    /*if (head_list[source]->next == NULL) {
-        end_list[source] = head_list[source];
-    }*/
     if (prev->next == NULL) {
         end_list[source] = prev;
     }
@@ -487,10 +498,11 @@ MIMPI_Retcode MIMPI_Barrier() {
     if (right_subtree < world_size) {
         rse= MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
     }
+    //("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
             if (lse > 0 && rse > 0) {
-                MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE);
+                MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
             }
             else {
                 parent_send = MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, BARRIER_MESSAGE - 1);
@@ -498,12 +510,13 @@ MIMPI_Retcode MIMPI_Barrier() {
         }
         else {
             if (lse > 0 && rse > 0) {
-                MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE);
+                MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
             }
             else {
                 parent_send = MIMPI_Send(&send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BARRIER_MESSAGE - 2);
             }
         }
+        //printf("Process: %d; parent_send: %d\n", my_rank, parent_send);
         parent_recv = MIMPI_Recv(recv_buffer, count, world_size, BARRIER_MESSAGE);
     }
     if (left_subtree < world_size) {
@@ -527,6 +540,9 @@ MIMPI_Retcode MIMPI_Barrier() {
         }
     }
     free(recv_buffer);
+    if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
+        return MIMPI_ERROR_REMOTE_FINISHED;
+    }
     return MIMPI_SUCCESS;
 }
 
