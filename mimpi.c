@@ -354,30 +354,32 @@ MIMPI_Retcode MIMPI_Send(
     int tag
 ) {
     // Lock to check if we still have somewhere to send
-    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[destination]));
     //Calculate destinations
     int dest;
-    if (tag == BARRIER_MESSAGE || tag == FINALIZE_MESSAGE) {
+    if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == FINALIZE_MESSAGE) {
         dest = (destination - 580) / 3;
     }
-    else if (tag == BARRIER_MESSAGE - 1 || tag == FINALIZE_MESSAGE - 1) {
+    else if (tag == BARRIER_MESSAGE - 1 || tag == BROADCAST_MESSAGE - 1 || tag == FINALIZE_MESSAGE - 1) {
         if (tag == BARRIER_MESSAGE - 1) { tag = BARRIER_MESSAGE; }
+        else if (tag == BROADCAST_MESSAGE - 1) { tag = BROADCAST_MESSAGE; }
         else if (tag == FINALIZE_MESSAGE - 1) { tag = FINALIZE_MESSAGE; }
         dest = (destination - 1 - 580)/3;
     }
-    else if (tag == BARRIER_MESSAGE - 2 || tag == FINALIZE_MESSAGE - 2) {
+    else if (tag == BARRIER_MESSAGE - 2 || tag == BROADCAST_MESSAGE - 2 || tag == FINALIZE_MESSAGE - 2) {
         if (tag == BARRIER_MESSAGE - 2) { tag = BARRIER_MESSAGE; }
+        else if (tag == BROADCAST_MESSAGE - 2) { tag = BROADCAST_MESSAGE; }
         else if (tag == FINALIZE_MESSAGE - 2) { tag = FINALIZE_MESSAGE; }
         dest = (destination - 2 - 580)/3;
     }
     else {
         dest = destination;
     }
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]));
     if (pipes_state[dest] == FINALIZE_MESSAGE || was_pipe_closed(dest)) {
-        ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[destination]));
+        ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
-    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[destination]));
+    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
     //TODO
 
     int my_rank = MIMPI_World_rank();
@@ -528,7 +530,7 @@ MIMPI_Retcode MIMPI_Barrier() {
         lse = MIMPI_Recv(recv_buffer, count, world_size + 1, BARRIER_MESSAGE);
     }
     if (right_subtree < world_size) {
-        rse= MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
+        rse = MIMPI_Recv(recv_buffer, count, world_size + 2, BARRIER_MESSAGE);
     }
     //printf("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
@@ -573,9 +575,6 @@ MIMPI_Retcode MIMPI_Barrier() {
     }
     free(recv_buffer);
     if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
-        int parent_id = (my_rank / 2);
-        if (my_rank % 2 == 0) { --parent_id; }
-        //printf("lse: %d; rse: %d; parent_send: %d; parent_recv: %d; mi id: %d; parent id: %d\n", lse, rse, parent_send, parent_recv, my_rank, parent_id);
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
     return MIMPI_SUCCESS;
@@ -591,50 +590,88 @@ MIMPI_Retcode MIMPI_Bcast(
     int my_rank = MIMPI_World_rank();
     int left_subtree = 2 * my_rank + 1;
     int right_subtree = 2 * my_rank + 2;
+    int lse = -1;
+    int rse = -1;
+    int parent_send = -1;
+    int parent_recv = -1;
+    void* temp_buffer = malloc(count);
+    memcpy(temp_buffer, data, count);
     if (left_subtree < world_size) {
         if (root != my_rank) {
-            MIMPI_Recv(data, count, world_size + 4, BROADCAST_MESSAGE);
+            lse = MIMPI_Recv(data, count, world_size + 1, BROADCAST_MESSAGE);
         }
         else {
             char* recv_buffer = malloc(count);
-            MIMPI_Recv(recv_buffer, count, world_size + 4, BROADCAST_MESSAGE);
+            lse = MIMPI_Recv(recv_buffer, count, world_size + 1, BROADCAST_MESSAGE);
             free(recv_buffer);
         }
     }
     if (right_subtree < world_size) {
         if (root != my_rank) {
-            MIMPI_Recv(data, count, world_size + 5, BROADCAST_MESSAGE);
+            rse = MIMPI_Recv(data, count, world_size + 2, BROADCAST_MESSAGE);
         }
         else {
             char* recv_buffer = malloc(count);
-            MIMPI_Recv(recv_buffer, count, world_size + 5, BROADCAST_MESSAGE);
+            rse = MIMPI_Recv(recv_buffer, count, world_size + 2, BROADCAST_MESSAGE);
             free(recv_buffer);
         }
     }
+    //printf("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
         if (my_rank % 2 != 0) {
-            MIMPI_Send(data, count, 676 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE);
+            if (lse > 0 || rse > 0) {
+                MIMPI_Send(data, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
+            }
+            else {
+                parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE - 1);
+            }
         }
         else {
-            MIMPI_Send(data, count, 676 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE);
+            if (lse > 0 || rse > 0) {
+                MIMPI_Send(data, count, 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
+            }
+            else {
+                parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE - 2);
+            }
         }
 
         if (root != my_rank) {
-            MIMPI_Recv(data, count, world_size + 3, BROADCAST_MESSAGE);
+            parent_recv = MIMPI_Recv(data, count, world_size, BROADCAST_MESSAGE);
         }
         else {
             char* recv_buffer = malloc(count);
-            MIMPI_Recv(recv_buffer, count, world_size + 3, BROADCAST_MESSAGE);
+            parent_recv = MIMPI_Recv(recv_buffer, count, world_size, BROADCAST_MESSAGE);
             free(recv_buffer);
         }
     }
+    //printf("Process: %d; parent_send: %d; parent_recv: %d\n", my_rank, parent_send, parent_recv);
     if (left_subtree < world_size) {
-        MIMPI_Send(data, count, 676 + left_subtree * 3, BROADCAST_MESSAGE);
+        if (lse == 0) {
+            if (parent_send > 0 || parent_recv > 0 || rse > 0) {
+                MIMPI_Send(data, count, 580 + left_subtree * 3, FINALIZE_MESSAGE);
+            }
+            else {
+                MIMPI_Send(data, count, 580 + left_subtree * 3, BROADCAST_MESSAGE);
+            }
+        }
     }
     if (right_subtree < world_size) {
-        MIMPI_Send(data, count, 676 + right_subtree * 3, BROADCAST_MESSAGE);
+        if (rse == 0) {
+            if (parent_send > 0 || parent_recv > 0 || lse > 0) {
+                MIMPI_Send(data, count, 580 + right_subtree * 3, FINALIZE_MESSAGE);
+            }
+            else {
+                MIMPI_Send(data, count, 580 + right_subtree * 3, BROADCAST_MESSAGE);
+            }
+        }
     }
 
+    if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
+        memcpy(data, temp_buffer, count);
+        free(temp_buffer);
+        return MIMPI_ERROR_REMOTE_FINISHED;
+    }
+    free(temp_buffer);
     return MIMPI_SUCCESS;
 }
 
