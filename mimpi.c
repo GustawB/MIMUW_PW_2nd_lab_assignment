@@ -350,8 +350,8 @@ MIMPI_Retcode MIMPI_Recv(
     //printf("Getting data\n");
     buffer_list* prev = head_list[source];
     buffer_list* iter = head_list[source]->next;
-    while (iter != NULL && iter->count != count) {
-        if ((tag == MIMPI_ANY_TAG || iter->tag == tag) && iter->count == count) {
+    while (iter != NULL) {
+        if (iter->count == count && (iter->tag == tag || (tag == MIMPI_ANY_TAG && iter->tag > 0))) {
             break;
         }
         iter = iter->next;
