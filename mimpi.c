@@ -697,21 +697,24 @@ MIMPI_Retcode MIMPI_Reduce(
     int parent_recv = -1;
     void* recv_buffer = malloc(sizeof(uint8_t) * count);
     uint8_t send_buffer[count];
-    memcpy(&send_buffer, send_data, count);
+    memcpy(send_buffer, send_data, count);
+    //printf("Process %d came with data %d %d %d %d\n", my_rank, send_buffer[0], send_buffer[1], send_buffer[2], send_buffer[3]);
     if (left_subtree < world_size) {
         lse = MIMPI_Recv(recv_buffer, count, world_size + 1, REDUCE_MESSAGE);
-        for (int i = 0; i < count && lse == 0; ++i) {
-            if (op == MIMPI_MAX) {
-                send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
-            }
-            else if (op == MIMPI_MIN) {
-                send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
-            }
-            else if (op == MIMPI_SUM) {
-                send_buffer[i] += ((uint8_t*)recv_buffer)[i];
-            }
-            else if (op == MIMPI_PROD) {
-                send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+        if (lse == 0) {
+            for (int i = 0; i < count; ++i) {
+                if (op == MIMPI_MAX) {
+                    send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                }
+                else if (op == MIMPI_MIN) {
+                    send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                }
+                else if (op == MIMPI_SUM) {
+                    send_buffer[i] += ((uint8_t*)recv_buffer)[i];
+                }
+                else if (op == MIMPI_PROD) {
+                    send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+                }
             }
         }
     }
@@ -719,21 +722,24 @@ MIMPI_Retcode MIMPI_Reduce(
     recv_buffer = malloc(sizeof(uint8_t) * count);
     if (right_subtree < world_size) {
         rse = MIMPI_Recv(recv_buffer, count, world_size + 2, REDUCE_MESSAGE);
-        for (int i = 0; i < count && rse == 0; ++i) {
-            if (op == MIMPI_MAX) {
-                send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
-            }
-            else if (op == MIMPI_MIN) {
-                send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
-            }
-            else if (op == MIMPI_SUM) {
-                send_buffer[i] += ((uint8_t*)recv_buffer)[i];
-            }
-            else if (op == MIMPI_PROD) {
-                send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+        if (rse == 0) {
+            for (int i = 0; i < count; ++i) {
+                if (op == MIMPI_MAX) {
+                    send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                }
+                else if (op == MIMPI_MIN) {
+                    send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                }
+                else if (op == MIMPI_SUM) {
+                    send_buffer[i] += ((uint8_t*)recv_buffer)[i];
+                }
+                else if (op == MIMPI_PROD) {
+                    send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+                }
             }
         }
     }
+    //printf("Process %d ended-up with data %d %d %d %d\n", my_rank, send_buffer[0], send_buffer[1], send_buffer[2], send_buffer[3]);
     free(recv_buffer);
     recv_buffer = malloc(sizeof(uint8_t) * count);
     if (my_rank > 0) {
@@ -753,15 +759,14 @@ MIMPI_Retcode MIMPI_Reduce(
                 parent_send = MIMPI_Send(send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, REDUCE_MESSAGE - 2);
             }
         }
+        free(recv_buffer);
+        recv_buffer = malloc(sizeof(uint8_t) * count);
         parent_recv = MIMPI_Recv(recv_buffer, count, world_size, REDUCE_MESSAGE);
+        memcpy(send_buffer, recv_buffer, count);
+        //printf("Process %d received from parent: %d %d %d %d\n", my_rank, ((uint8_t*)recv_buffer)[0], ((uint8_t*)recv_buffer)[1], ((uint8_t*)recv_buffer)[2], ((uint8_t*)recv_buffer)[3]);
     }
     if (root == my_rank && lse <= 0 && rse <= 0 && parent_recv <= 0 && parent_send <= 0) {
-        if (root == 0) {
-            memcpy(recv_data, send_buffer, count);
-        }
-        else {
-            memcpy(recv_data, recv_buffer, count);
-        }
+        memcpy(recv_data, send_buffer, count);
     }
     if (left_subtree < world_size) {
         if (lse == 0) {
