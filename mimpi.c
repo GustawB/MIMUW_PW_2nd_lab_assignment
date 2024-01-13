@@ -639,12 +639,19 @@ MIMPI_Retcode MIMPI_Bcast(
     }
     //printf("Process: %d; lse: %d; rse: %d\n", my_rank, lse, rse);
     if (my_rank > 0) {
+        char* send_buffer = malloc(count);
+        memset(send_buffer, 0, count);
         if (my_rank % 2 != 0) {
             if (lse > 0 || rse > 0) {
-                MIMPI_Send(data, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
+                MIMPI_Send(send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
             }
             else {
-                parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE - 1);
+                if (my_rank == root || side != 0) {
+                    parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE - 1);
+                }
+                else {
+                    parent_send = MIMPI_Send(send_buffer, count, 580 + ((my_rank / 2) * 3) + 1, BROADCAST_MESSAGE - 1);
+                }
             }
         }
         else {
@@ -652,9 +659,15 @@ MIMPI_Retcode MIMPI_Bcast(
                 MIMPI_Send(data, count, 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
             }
             else {
-                parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE - 2);
+                if (my_rank == root || side != 0) {
+                    parent_send = MIMPI_Send(data, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE - 2);
+                }
+                else {
+                    parent_send = MIMPI_Send(send_buffer, count, 580 + ((my_rank / 2 - 1) * 3) + 2, BROADCAST_MESSAGE - 2);
+                }
             }
         }
+        free(send_buffer);
 
         if (root != my_rank) {
             parent_recv = MIMPI_Recv(data, count, world_size, BROADCAST_MESSAGE);
