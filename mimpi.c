@@ -237,13 +237,11 @@ void MIMPI_Finalize() {
         ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
     }
     int iter = world_size;
-    //printf("Process %d killed all normal threads\n", my_rank);
     for (int i = 0; i < 3; ++i) {
         kill_thread(&params, sizeof(writer_params), 580 + my_rank * 3 + i);
         ASSERT_ZERO(pthread_join(pipe_threads[iter], NULL));
         ++iter;
     }
-    //printf("Process %d killed all group threads\n", my_rank);
 
     // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
@@ -725,25 +723,27 @@ MIMPI_Retcode MIMPI_Reduce(
     int rse = -1;
     int parent_send = -1;
     int parent_recv = -1;
-    void* recv_buffer = malloc(sizeof(uint8_t) * count);
-    uint8_t send_buffer[count];
+    void* recv_buffer = malloc(count);
+    //printf("%d pre-data init\n", my_rank);
+    //uint8_t send_buffer[count];
+    void* send_buffer = malloc(count);
     memcpy(send_buffer, send_data, count);
-    //printf("Process %d came with data %d %d %d %d\n", my_rank, send_buffer[0], send_buffer[1], send_buffer[2], send_buffer[3]);
+    //printf("%d entered reduce\n", my_rank);
     if (left_subtree < world_size) {
         lse = MIMPI_Recv(recv_buffer, count, world_size + 1, REDUCE_MESSAGE);
         if (lse == 0) {
             for (int i = 0; i < count; ++i) {
                 if (op == MIMPI_MAX) {
-                    send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                    ((uint8_t*)send_buffer)[i] = MAX(((uint8_t*)send_buffer)[i], ((uint8_t*)recv_buffer)[i]);
                 }
                 else if (op == MIMPI_MIN) {
-                    send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                    ((uint8_t*)send_buffer)[i] = MIN(((uint8_t*)send_buffer)[i], ((uint8_t*)recv_buffer)[i]);
                 }
                 else if (op == MIMPI_SUM) {
-                    send_buffer[i] += ((uint8_t*)recv_buffer)[i];
+                    ((uint8_t*)send_buffer)[i] += ((uint8_t*)recv_buffer)[i];
                 }
                 else if (op == MIMPI_PROD) {
-                    send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+                    ((uint8_t*)send_buffer)[i] *= ((uint8_t*)recv_buffer)[i];
                 }
             }
         }
@@ -755,21 +755,21 @@ MIMPI_Retcode MIMPI_Reduce(
         if (rse == 0) {
             for (int i = 0; i < count; ++i) {
                 if (op == MIMPI_MAX) {
-                    send_buffer[i] = MAX(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                    ((uint8_t*)send_buffer)[i] = MAX(((uint8_t*)send_buffer)[i], ((uint8_t*)recv_buffer)[i]);
                 }
                 else if (op == MIMPI_MIN) {
-                    send_buffer[i] = MIN(send_buffer[i], ((uint8_t*)recv_buffer)[i]);
+                    ((uint8_t*)send_buffer)[i] = MIN(((uint8_t*)send_buffer)[i], ((uint8_t*)recv_buffer)[i]);
                 }
                 else if (op == MIMPI_SUM) {
-                    send_buffer[i] += ((uint8_t*)recv_buffer)[i];
+                    ((uint8_t*)send_buffer)[i] += ((uint8_t*)recv_buffer)[i];
                 }
                 else if (op == MIMPI_PROD) {
-                    send_buffer[i] *= ((uint8_t*)recv_buffer)[i];
+                    ((uint8_t*)send_buffer)[i] *= ((uint8_t*)recv_buffer)[i];
                 }
             }
         }
     }
-    //printf("Process %d ended-up with data %d %d %d %d\n", my_rank, send_buffer[0], send_buffer[1], send_buffer[2], send_buffer[3]);
+    //printf("%d received from children\n", my_rank);
     free(recv_buffer);
     recv_buffer = malloc(sizeof(uint8_t) * count);
     if (my_rank > 0) {
@@ -793,7 +793,7 @@ MIMPI_Retcode MIMPI_Reduce(
         recv_buffer = malloc(sizeof(uint8_t) * count);
         parent_recv = MIMPI_Recv(recv_buffer, count, world_size, REDUCE_MESSAGE);
         memcpy(send_buffer, recv_buffer, count);
-        //printf("Process %d received from parent: %d %d %d %d\n", my_rank, ((uint8_t*)recv_buffer)[0], ((uint8_t*)recv_buffer)[1], ((uint8_t*)recv_buffer)[2], ((uint8_t*)recv_buffer)[3]);
+
     }
     if (root == my_rank && lse <= 0 && rse <= 0 && parent_recv <= 0 && parent_send <= 0) {
         memcpy(recv_data, send_buffer, count);
@@ -820,6 +820,7 @@ MIMPI_Retcode MIMPI_Reduce(
     }
 
     free(recv_buffer);
+    free(send_buffer);
     if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
