@@ -48,8 +48,13 @@ _Noreturn extern void fatal(const char* fmt, ...);
 /////////////////////////////////////////////
 // Put your declarations here
 
-
-
-
-
+/* Assert that expression doesn't evaluate to null (for e.g. *env family). If it does*/
+#define ASSERT_NOT_NULL(expr)                                                                \
+    do {                                                                                   \
+        if ((expr) == NULL)                                                                  \
+            syserr(                                                                        \
+                "system command returned null: %s\n\tIn function %s() in %s line %d.\n\tErrno: ", \
+                #expr, __func__, __FILE__, __LINE__                                        \
+            );                                                                             \
+    } while(0) 
 #endif // MIMPI_COMMON_H
