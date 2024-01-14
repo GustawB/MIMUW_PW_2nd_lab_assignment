@@ -84,6 +84,7 @@ void* read_data(void* data) {
         int recv_length = chrecv(local_source, temp, sizeof(metadata));
         if (recv_length == 0) {
             //printf("Thread %d with source %d exiting\n", params.my_rank, local_source);
+            free(temp);
             ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
             pipes_state[params.source] = FINALIZE_MESSAGE;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
@@ -149,7 +150,7 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
     //TODO
     int world_size = MIMPI_World_size();
-    int nr_of_threads_to_create = world_size;
+    int nr_of_threads_to_create = world_size + 3;
 
     pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
     read_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
@@ -188,39 +189,41 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     }
 }
 
-void kill_thread(void* params, size_t count, int destination) {
-    char* buffer = malloc(sizeof(metadata) + count);
-    metadata* md = (metadata*)buffer;
-    writer_params params_p = *((writer_params*)params);
-    md->size = params_p.count;
-    md->count = params_p.count;
-    md->tag = KILL_THREAD;
-
-    memcpy(buffer + sizeof(metadata), &params_p, count);
-    ssize_t sent = chsend(destination, buffer, count + sizeof(metadata));
-    free(buffer);
-    ASSERT_SYS_OK(sent);
-}
-
 void MIMPI_Finalize() {
     //TODO
     int my_rank = MIMPI_World_rank(); // Get the id of the process.
     int world_size = MIMPI_World_size();
+
+    // Close group write file descriptors.
+    int left_subtree = 2 * my_rank + 1;
+    int right_subtree = 2 * my_rank + 2;
+    if (my_rank > 0) {
+        if (my_rank % 2 != 0) {
+            ASSERT_SYS_OK(close(580 + ((my_rank / 2) * 3) + 1));
+        }
+        else {
+            ASSERT_SYS_OK(close(580 + ((my_rank / 2 - 1) * 3) + 2));
+        }
+    }
+    if (left_subtree < world_size) {
+        ASSERT_SYS_OK(close(580 + left_subtree * 3));
+    }
+    if (right_subtree < world_size) {
+        ASSERT_SYS_OK(close(580 + right_subtree * 3));
+    }
 
     for (int i = 0; i < world_size; ++i) {
         // Close write descriptor.
         ASSERT_SYS_OK(close(276 + my_rank + i * 16));
     }
 
-    //printf("Process %d will be joining threads\n", my_rank);
     // Wait for all helper threads to finish.
-    for (int i = 0; i < world_size; ++i) {
+    for (int i = 0; i < world_size + 3; ++i) {
         if (i != my_rank) {
             ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
         }
         //printf("Process %d joined thread %d\n", my_rank, i);
     }
-    //printf("Process %d joined all threads\n", my_rank);
 
     // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
@@ -228,7 +231,11 @@ void MIMPI_Finalize() {
         ASSERT_SYS_OK(close(20 + my_rank * 16 + i));
     }
 
-    for (int i = 0; i < world_size; ++i) {
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_SYS_OK(close(532 + my_rank * 3 + i));
+    }
+
+    for (int i = 0; i < world_size + 3; ++i) {
         buffer_list* cleaner = head_list[i];
         while (head_list[i] != NULL)
         {
@@ -331,13 +338,13 @@ MIMPI_Retcode MIMPI_Send(
     else {
         dest = destination;
     }
-    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]));
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]) || was_pipe_closed(dest));
     if (pipes_state[dest] == FINALIZE_MESSAGE) {
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
-    //TODO
+
     int alloc_size = count % PIPE_BUFF_UPDT;
     int local_dest;
     if (tag == BARRIER_MESSAGE || tag == BROADCAST_MESSAGE || tag == REDUCE_MESSAGE || tag == FINALIZE_MESSAGE) {
@@ -423,7 +430,7 @@ MIMPI_Retcode MIMPI_Recv(
     if (!is_there_data_to_read(source, count, tag)) {
         while (!is_there_data_to_read(source, count, tag)) {
             //printf("Process %d waiting for data from source: %d.\n", MIMPI_World_rank(), source);
-            if (pipes_state[source] == FINALIZE_MESSAGE) {
+            if (pipes_state[source] == FINALIZE_MESSAGE || was_pipe_closed(source)) {
                 ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
                 return MIMPI_ERROR_REMOTE_FINISHED;
             }

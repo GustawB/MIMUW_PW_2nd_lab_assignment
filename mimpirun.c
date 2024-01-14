@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
     }
     
     // Create 3n pipes for the group communication.
-    /*for (int i = 0; i < nr_of_copies; ++i) {
+    for (int i = 0; i < nr_of_copies; ++i) {
         for (int j = 0; j < 3; ++j) {
             int channel_dsc[2];
             ASSERT_SYS_OK(channel(channel_dsc));
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
             // Close the old write descriptor.
             ASSERT_SYS_OK(close(channel_dsc[1]));
         }
-    }*/
+    }
 
     const char* MIMPI_envvar_name_id = "process_id";
     const char* MIMPI_envvar_name_world_size = "world_size";
@@ -87,15 +87,29 @@ int main(int argc, char** argv) {
                     if (j != i) {
                         ASSERT_SYS_OK(close(20 + j * 16 + k));
                     }
-                   // else {
-                   //     printf("Leaving %d in %d\n", 20 + j * 16 + k, i);
-                   // }
                     if (k != i) {
                         ASSERT_SYS_OK(close(276 + j * 16 + k));
                     }
-                  //  else {
-                   //     printf("Leaving %d in %d\n", 276 + j * 16 + k, i);
-                    //}
+                }
+            }
+            int parent_desc;
+            int left_child = 580 + (2 * i + 1) * 3;
+            int right_child = 580 + (2 * i + 2) * 3;
+            if (i % 2 != 0) {
+                parent_desc = 580 + ((i / 2) * 3) + 1;
+            }
+            else{
+                parent_desc = 580 + ((i / 2 - 1) * 3) + 2;
+            }
+            for (int j = 0; j < nr_of_copies; ++j) {
+                for (int k = 0; k < 3; ++k) {
+                    int fd = 580 + k + j * 3;
+                    if (fd != parent_desc && fd != left_child && fd != right_child) {
+                        ASSERT_SYS_OK(close(fd));
+                    }
+                    if (j != i) {
+                        ASSERT_SYS_OK(close(532 + k + j * 3));
+                    }
                 }
             }
             ASSERT_SYS_OK(execvp(fp_prog, arg));
@@ -108,6 +122,15 @@ int main(int argc, char** argv) {
             ASSERT_SYS_OK(close(20 + j + i * 16));
             // Close the old write descriptor.
             ASSERT_SYS_OK(close(276 + j + i * 16));
+        }
+    }
+
+    for (int i = 0; i < nr_of_copies; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            // Close the old read descriptor.
+            ASSERT_SYS_OK(close(532 + j + i * 3));
+            // Close the old write descriptor.
+            ASSERT_SYS_OK(close(580 + j + i * 3));
         }
     }
 
