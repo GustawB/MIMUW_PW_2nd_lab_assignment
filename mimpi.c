@@ -79,17 +79,19 @@ void* read_data(void* data) {
         fatal("Forgot to delete descriptors for broadcast and reduce\n");
     }
     void* temp = malloc(sizeof(metadata));
+    //printf("Thread %d with source %d \n", params.my_rank, local_source);
     while (1) {
-        chrecv(local_source, temp, sizeof(metadata));
+        int recv_length = chrecv(local_source, temp, sizeof(metadata));
+        if (recv_length == 0) {
+            //printf("Thread %d with source %d exiting\n", params.my_rank, local_source);
+            ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
+            pipes_state[params.source] = FINALIZE_MESSAGE;
+            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
+            break;
+        }
         metadata md = *((metadata*)temp);
         char* buffer = malloc(md.size);
         chrecv(local_source, buffer, md.size);
-        if (md.tag == KILL_THREAD) {
-            free(buffer);
-            free(temp);
-            break;
-        }
-        //printf("Process %d received data in thread with tag %d from source %d\n", params.my_rank, md.tag,params.source);
         ASSERT_ZERO(pthread_mutex_lock(&read_mutex[params.source]));
         end_list[params.source]->next = malloc(sizeof(buffer_list));
         end_list[params.source] = end_list[params.source]->next;
@@ -138,6 +140,8 @@ void* read_data(void* data) {
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
 
+    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
+    //printf("Thread exiting\n");
     return NULL;
 }
 
@@ -145,7 +149,7 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
     //TODO
     int world_size = MIMPI_World_size();
-    int nr_of_threads_to_create = world_size + 3;
+    int nr_of_threads_to_create = world_size;
 
     pipe_threads = malloc(nr_of_threads_to_create * sizeof(pthread_t));
     read_mutex = malloc(nr_of_threads_to_create * sizeof(pthread_mutex_t));
@@ -173,12 +177,14 @@ void MIMPI_Init(bool enable_deadlock_detection) {
     }
 
     for (int i = 0; i < nr_of_threads_to_create; ++i) {
-        char* buffer = malloc(sizeof(reader_params));
-        reader_params* params = (reader_params*)buffer;
-        params->my_rank = MIMPI_World_rank();
-        params->source = i;
-        params->world_size = world_size;
-        ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
+        if (i != MIMPI_World_rank()) {
+            char* buffer = malloc(sizeof(reader_params));
+            reader_params* params = (reader_params*)buffer;
+            params->my_rank = MIMPI_World_rank();
+            params->source = i;
+            params->world_size = world_size;
+            ASSERT_ZERO(pthread_create(&pipe_threads[i], NULL, read_data, params));
+        }
     }
 }
 
@@ -200,69 +206,29 @@ void MIMPI_Finalize() {
     //TODO
     int my_rank = MIMPI_World_rank(); // Get the id of the process.
     int world_size = MIMPI_World_size();
-    //printf("Process %d enters Finalize\n", my_rank);
 
-    // Close all threads.
-    writer_params params;
-    int data = 0;
-    params.data = &data;
-    params.count = sizeof(int);
-    params.tag = -1;
-
-    // Send info to all other processes that we are leaving.
-    char finalize_data = FINALIZE_MESSAGE;
     for (int i = 0; i < world_size; ++i) {
-        MIMPI_Send(&finalize_data, sizeof(finalize_data), i, SMALL_FINALIZE);
-    }
-    int left_subtree = 2 * my_rank + 1;
-    int right_subtree = 2 * my_rank + 2;
-    if (my_rank > 0) {
-        if (my_rank % 2 != 0) {
-            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + ((my_rank / 2) * 3) + 1, FINALIZE_MESSAGE - 1);
-        }
-        else {
-            MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + ((my_rank / 2 - 1) * 3) + 2, FINALIZE_MESSAGE - 2);
-        }
-    }
-    if (left_subtree < world_size) {
-        MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + left_subtree * 3, FINALIZE_MESSAGE);
-    }
-    if (right_subtree < world_size) {
-        MIMPI_Send(&finalize_data, sizeof(finalize_data), 580 + right_subtree * 3, FINALIZE_MESSAGE);
+        // Close write descriptor.
+        ASSERT_SYS_OK(close(276 + my_rank + i * 16));
     }
 
-    // Kill all helper threads.
+    //printf("Process %d will be joining threads\n", my_rank);
+    // Wait for all helper threads to finish.
     for (int i = 0; i < world_size; ++i) {
-        kill_thread(&params, sizeof(writer_params), 276 + my_rank * 16 + i);
-        ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
+        if (i != my_rank) {
+            ASSERT_ZERO(pthread_join(pipe_threads[i], NULL));
+        }
+        //printf("Process %d joined thread %d\n", my_rank, i);
     }
-    int iter = world_size;
-    for (int i = 0; i < 3; ++i) {
-        kill_thread(&params, sizeof(writer_params), 580 + my_rank * 3 + i);
-        ASSERT_ZERO(pthread_join(pipe_threads[iter], NULL));
-        ++iter;
-    }
+    //printf("Process %d joined all threads\n", my_rank);
 
     // Close all read/write descriptors.
     for (int i = 0; i < world_size; ++i) {
-        for (int j = 0; j < world_size; ++j) {
-            // Close read descriptor.
-            ASSERT_SYS_OK(close(20 + j + i * 16));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(276 + j + i * 16));
-        }
-    }
-    // Close all barrier descriptors.
-    for (int i = 0; i < world_size; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            // Close read descriptor.
-            ASSERT_SYS_OK(close(532 + j + i * 3));
-            // Close write descriptor.
-            ASSERT_SYS_OK(close(580 + j + i * 3));
-        }
+        // Close read descriptor.
+        ASSERT_SYS_OK(close(20 + my_rank * 16 + i));
     }
 
-    for (int i = 0; i < world_size + 3; ++i) {
+    for (int i = 0; i < world_size; ++i) {
         buffer_list* cleaner = head_list[i];
         while (head_list[i] != NULL)
         {
@@ -366,7 +332,7 @@ MIMPI_Retcode MIMPI_Send(
         dest = destination;
     }
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]));
-    if (pipes_state[dest] == FINALIZE_MESSAGE || was_pipe_closed(dest)) {
+    if (pipes_state[dest] == FINALIZE_MESSAGE) {
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
@@ -457,7 +423,7 @@ MIMPI_Retcode MIMPI_Recv(
     if (!is_there_data_to_read(source, count, tag)) {
         while (!is_there_data_to_read(source, count, tag)) {
             //printf("Process %d waiting for data from source: %d.\n", MIMPI_World_rank(), source);
-            if (pipes_state[source] == FINALIZE_MESSAGE || was_pipe_closed(source)) {
+            if (pipes_state[source] == FINALIZE_MESSAGE) {
                 ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
                 return MIMPI_ERROR_REMOTE_FINISHED;
             }
