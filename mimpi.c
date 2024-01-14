@@ -141,14 +141,14 @@ void* read_data(void* data) {
             waiting_for_tag[params.source] = -1;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
         }
-        else if (deadlock_detection && waiting_for_count[params.source] != -1 &&
-            waiting_for_tag[params.source] > 0 &&
+        else if (deadlock_detection && waiting_for_tag[params.source] > 0 &&
             md.tag == DEADLOCK_MESSAGE - waiting_for_tag[params.source]) {
-            if((*(int*)end_list[params.source]->buffer) == waiting_for_count[params.source])
-            waiting_for_count[params.source] = -1;
-            waiting_for_tag[params.source] = -1;
-            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
-        }
+            if ((*(int*)end_list[params.source]->buffer) == waiting_for_count[params.source]) {
+                waiting_for_count[params.source] = -1;
+                waiting_for_tag[params.source] = -1;
+                ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
+            }
+        }        
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
 
@@ -431,8 +431,9 @@ MIMPI_Retcode MIMPI_Send(
         md->tag = tag;
         //printf("Send %d tag to %d\n", tag, local_dest);
         memcpy(buffer + sizeof(metadata), data + ((count / PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size);
-
+        //printf("Before actual send: %d\n", my_rank);
         ssize_t sent = chsend(local_dest, buffer, alloc_size + sizeof(metadata));
+        //printf("After actual send: %d\n", my_rank);
         free(buffer);
         if (sent == -1) {
             printf("Local dest: %d; destination: %d; tag: %d\n", local_dest, destination, tag);
@@ -441,7 +442,7 @@ MIMPI_Retcode MIMPI_Send(
         if (sent != alloc_size + sizeof(metadata))
             fatal("Wrote less than expected.");
     }
-
+    //printf("Out of send: %d\n", my_rank);
     return MIMPI_SUCCESS;
 }
 
@@ -496,15 +497,17 @@ MIMPI_Retcode MIMPI_Recv(
     else if (source >= MIMPI_World_size() && tag > 0) {
         return MIMPI_ERROR_NO_SUCH_RANK;
     }
-    if (deadlock_detection && tag > 0) {
-        int deadlock_data = count;
-        //printf("Before deadlock send: %d\n", source);
-        MIMPI_Send(&deadlock_data, sizeof(int), source, DEADLOCK_MESSAGE - tag);
-        //printf("After deadlock send: %d\n", source);
-    }
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
+        if (deadlock_detection && tag > 0) {
+            int deadlock_data = count;
+            //printf("Before deadlock send: %d\n", source);
+            ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
+            MIMPI_Send(&deadlock_data, sizeof(int), source, DEADLOCK_MESSAGE - tag);
+            ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
+            //printf("After deadlock send: %d\n", source);
+        }
         while (!is_there_data_to_read(source, count, tag)) {
             //printf("Process %d waiting for data from source: %d.\n", MIMPI_World_rank(), source);
             if (deadlock_detection) {
