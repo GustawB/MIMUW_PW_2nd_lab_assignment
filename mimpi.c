@@ -338,8 +338,8 @@ MIMPI_Retcode MIMPI_Send(
     else {
         dest = destination;
     }
-    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]) || was_pipe_closed(dest));
-    if (pipes_state[dest] == FINALIZE_MESSAGE) {
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]));
+    if (pipes_state[dest] == FINALIZE_MESSAGE || was_pipe_closed(dest)) {
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
