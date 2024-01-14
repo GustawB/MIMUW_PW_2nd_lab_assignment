@@ -53,6 +53,9 @@ typedef struct metadata metadata;
 #define REDUCE_MESSAGE -9
 #define SMALL_FINALIZE -12
 #define FINALIZE_MESSAGE -13
+#define DEADLOCK_MESSAGE -20
+
+bool deadlock_detection = false;
 
 pthread_t* pipe_threads;
 pthread_mutex_t* read_mutex;
@@ -138,6 +141,12 @@ void* read_data(void* data) {
             waiting_for_tag[params.source] = -1;
             ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
         }
+        else if (waiting_for_count[params.source] != -1 &&
+            md.tag == DEADLOCK_MESSAGE) {
+            waiting_for_count[params.source] = -1;
+            waiting_for_tag[params.source] = -1;
+            ASSERT_ZERO(pthread_cond_signal(&read_cond[params.source]));
+        }
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[params.source]));
     }
 
@@ -148,6 +157,7 @@ void* read_data(void* data) {
 
 void MIMPI_Init(bool enable_deadlock_detection) {
     channels_init();
+    deadlock_detection = enable_deadlock_detection;
     //TODO
     int world_size = MIMPI_World_size();
     int nr_of_threads_to_create = world_size + 3;
@@ -302,6 +312,28 @@ bool was_pipe_closed(int source) {
     return false;
 }
 
+bool clear_deadlock_messages(int source) {
+    if (head_list[source] == end_list[source]) {
+        return false;
+    }
+    buffer_list* iter = head_list[source]->next;
+    buffer_list* prev = head_list[source];
+    while (iter != NULL) {
+        if (iter->tag == DEADLOCK_MESSAGE) {
+            prev->next = iter->next;
+            free(iter->buffer);
+            free(iter);
+            if (prev->next == NULL) {
+                end_list[source] = prev;
+            }
+            return true;
+        }
+        iter = iter->next;
+        prev = prev->next;
+    }
+    return false;
+}
+
 MIMPI_Retcode MIMPI_Send(
     void const* data,
     int count,
@@ -338,11 +370,12 @@ MIMPI_Retcode MIMPI_Send(
     else {
         dest = destination;
     }
-    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]) || was_pipe_closed(dest));
-    if (pipes_state[dest] == FINALIZE_MESSAGE) {
+    ASSERT_ZERO(pthread_mutex_lock(&read_mutex[dest]);
+    if (pipes_state[dest] == FINALIZE_MESSAGE || was_pipe_closed(dest)) {
         ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
+    clear_deadlock_messages(destination);
     ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[dest]));
 
     int alloc_size = count % PIPE_BUFF_UPDT;
@@ -413,6 +446,28 @@ bool is_there_data_to_read(int source, int count, int tag) {
     return false;
 }
 
+bool was_deadlock_message_received(int source) {
+    if (head_list[source] == end_list[source]) {
+        return false;
+    }
+    buffer_list* iter = head_list[source]->next;
+    buffer_list* prev = head_list[source];
+    while (iter != NULL) {
+        if (iter->tag == DEADLOCK_MESSAGE) {
+            prev->next = iter->next;
+            free(iter->buffer);
+            free(iter);
+            if (prev->next == NULL) {
+                end_list[source] = prev;
+            }
+            return true;
+        }
+        iter = iter->next;
+        prev = prev->next;
+    }
+    return false;
+}
+
 MIMPI_Retcode MIMPI_Recv(
     void* data,
     int count,
@@ -428,11 +483,21 @@ MIMPI_Retcode MIMPI_Recv(
     //TODO
     ASSERT_ZERO(pthread_mutex_lock(&read_mutex[source]));
     if (!is_there_data_to_read(source, count, tag)) {
+        if (deadlock_detection) {
+            char deadlock_data = MIMPI_World_rank();
+            MIMPI_Send(&deadlock_data, 1, source, DEADLOCK_MESSAGE)
+        }
         while (!is_there_data_to_read(source, count, tag)) {
             //printf("Process %d waiting for data from source: %d.\n", MIMPI_World_rank(), source);
             if (pipes_state[source] == FINALIZE_MESSAGE || was_pipe_closed(source)) {
                 ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
                 return MIMPI_ERROR_REMOTE_FINISHED;
+            }
+            else if (deadlock_detection) {
+                if (was_deadlock_message_received(source)) {
+                    ASSERT_ZERO(pthread_mutex_unlock(&read_mutex[source]));
+                    return MIMPI_ERROR_DEADLOCK_DETECTED;
+                }
             }
             waiting_for_count[source] = count;
             waiting_for_tag[source] = tag;
