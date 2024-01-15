@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         pid_t pid = fork();
         ASSERT_SYS_OK(pid);
         if (!pid) {// Child
-            char id_buffer[sizeof(int)];
+            char id_buffer[16*sizeof(char)];
             // This will cast 'int i' to char*;
             int ret = sprintf(id_buffer, "%d", i);
             if (ret < 0 || ret >= (int)sizeof(id_buffer))
@@ -73,9 +73,9 @@ int main(int argc, char** argv) {
             ASSERT_ZERO(setenv(MIMPI_envvar_name_id, id_buffer, 0));
             // Add enviromental variable describing the id
             // of the executed program.
-            char world_size_buffer[sizeof(int)];
+            char world_size_buffer[16 * sizeof(char)];
             // This will cast 'int nr_of_copies' to char*;
-            sprintf(world_size_buffer, "%d", nr_of_copies);
+            ret = sprintf(world_size_buffer, "%d", nr_of_copies);
             if (ret < 0 || ret >= (int)sizeof(world_size_buffer))
                 fatal("Adding envvar_name_world_size failed");
             // Add enviromental variable describing the size
