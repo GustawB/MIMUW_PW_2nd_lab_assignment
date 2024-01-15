@@ -399,7 +399,7 @@ MIMPI_Retcode MIMPI_Send(
             md->size = PIPE_BUFF_UPDT;
             md->count = count;
             md->tag = tag;
-            memcpy(buffer + sizeof(metadata), data + (i * PIPE_BUFF_UPDT), PIPE_BUFF_UPDT);
+            ASSERT_NOT_NULL(memcpy(buffer + sizeof(metadata), data + (i * PIPE_BUFF_UPDT), PIPE_BUFF_UPDT));
             ssize_t sent = chsend(local_dest, buffer, PIPE_BUF);
             free(buffer);
             ASSERT_SYS_OK(sent);
@@ -413,7 +413,7 @@ MIMPI_Retcode MIMPI_Send(
         md->size = alloc_size;
         md->count = count;
         md->tag = tag;
-        memcpy(buffer + sizeof(metadata), data + ((count / PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size);
+        ASSERT_NOT_NULL(memcpy(buffer + sizeof(metadata), data + ((count / PIPE_BUFF_UPDT) * PIPE_BUFF_UPDT), alloc_size));
         ssize_t sent = chsend(local_dest, buffer, alloc_size + sizeof(metadata));
         free(buffer);
         ASSERT_SYS_OK(sent);
@@ -624,7 +624,7 @@ MIMPI_Retcode MIMPI_Bcast(
     int parent_send = -1;
     int parent_recv = -1;
     void* temp_buffer = malloc(count);
-    memcpy(temp_buffer, data, count);
+    ASSERT_NOT_NULL(memcpy(temp_buffer, data, count));
     if (left_subtree < world_size) {
         if (root != my_rank) {
             if (side == -1) {
@@ -721,7 +721,7 @@ MIMPI_Retcode MIMPI_Bcast(
     }
 
     if (lse > 0 || rse > 0 || parent_send > 0 || parent_recv > 0) {
-        memcpy(data, temp_buffer, count);
+        ASSERT_NOT_NULL(memcpy(data, temp_buffer, count));
         free(temp_buffer);
         return MIMPI_ERROR_REMOTE_FINISHED;
     }
@@ -747,7 +747,7 @@ MIMPI_Retcode MIMPI_Reduce(
     int parent_recv = -1;
     void* recv_buffer = malloc(count);
     void* send_buffer = malloc(count);
-    memcpy(send_buffer, send_data, count);
+    ASSERT_NOT_NULL(memcpy(send_buffer, send_data, count));
     if (left_subtree < world_size) {
         lse = MIMPI_Recv(recv_buffer, count, world_size + 1, REDUCE_MESSAGE);
         if (lse == 0) {
@@ -810,11 +810,11 @@ MIMPI_Retcode MIMPI_Reduce(
         free(recv_buffer);
         recv_buffer = malloc(sizeof(uint8_t) * count);
         parent_recv = MIMPI_Recv(recv_buffer, count, world_size, REDUCE_MESSAGE);
-        memcpy(send_buffer, recv_buffer, count);
+        ASSERT_NOT_NULL(memcpy(send_buffer, recv_buffer, count));
 
     }
     if (root == my_rank && lse <= 0 && rse <= 0 && parent_recv <= 0 && parent_send <= 0) {
-        memcpy(recv_data, send_buffer, count);
+        ASSERT_NOT_NULL(memcpy(recv_data, send_buffer, count));
     }
     if (left_subtree < world_size) {
         if (lse == 0) {
